@@ -1,0 +1,64 @@
+"""Cliente HTTP mínimo (stdlib) con timeout, User-Agent propio y reintentos."""
+
+from __future__ import annotations
+
+import logging
+import time
+import urllib.request
+from collections.abc import Callable
+from typing import Any
+from urllib.error import HTTPError, URLError
+
+from energia_monitor import __version__
+from energia_monitor.errores import ErrorFuente
+
+log = logging.getLogger(__name__)
+
+USER_AGENT = f"energia-monitor/{__version__} (colector de precios del mercado electrico)"
+
+
+class ClienteHttp:
+    """GET con reintentos y espera exponencial.
+
+    Devuelve el cuerpo, o None si el recurso no existe (404). Los errores
+    transitorios (red, timeout, 429 y 5xx) se reintentan; el resto falla.
+    """
+
+    def __init__(
+        self,
+        timeout: float = 30,
+        reintentos: int = 3,
+        espera_inicial: float = 5,
+        user_agent: str = USER_AGENT,
+        dormir: Callable[[float], None] = time.sleep,
+        abrir: Callable[..., Any] = urllib.request.urlopen,
+    ) -> None:
+        if reintentos < 1:
+            raise ValueError("reintentos debe ser >= 1")
+        self.timeout = timeout
+        self.reintentos = reintentos
+        self.espera_inicial = espera_inicial
+        self.user_agent = user_agent
+        self._dormir = dormir
+        self._abrir = abrir
+
+    def get(self, url: str) -> bytes | None:
+        ultimo_error: Exception | None = None
+        for intento in range(1, self.reintentos + 1):
+            peticion = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
+            try:
+                with self._abrir(peticion, timeout=self.timeout) as respuesta:
+                    return bytes(respuesta.read())
+            except HTTPError as e:
+                if e.code == 404:
+                    return None
+                if e.code != 429 and e.code < 500:
+                    raise ErrorFuente(f"HTTP {e.code} en {url}") from e
+                ultimo_error = e
+            except (URLError, TimeoutError, ConnectionError) as e:
+                ultimo_error = e
+            if intento < self.reintentos:
+                espera = self.espera_inicial * 2 ** (intento - 1)
+                log.warning("fallo en %s (%s); reintento %d en %.0f s", url, ultimo_error, intento, espera)
+                self._dormir(espera)
+        raise ErrorFuente(f"sin respuesta válida de {url} tras {self.reintentos} intentos") from ultimo_error

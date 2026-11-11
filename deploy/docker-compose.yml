@@ -15,7 +15,7 @@ services:
       # Por defecto solo accesible desde el propio NAS.
       # Si Grafana corre en otra máquina del tailnet, poner en PG_BIND la IP
       # de Tailscale del NAS.
-      - "${PG_BIND:-127.0.0.1}:${PG_PORT:-5433}:5432"
+      - "${PG_BIND:-127.0.0.1}:${PG_PORT:-5434}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s

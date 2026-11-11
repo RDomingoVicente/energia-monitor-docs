@@ -7,10 +7,14 @@ name = "energia-monitor"
 version = "0.0.1"
 description = "Colector de precios del mercado eléctrico y precio final según contrato"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["psycopg[binary]>=3.2,<4"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: requiere PostgreSQL (PGHOST)"]

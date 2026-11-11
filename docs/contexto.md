@@ -20,9 +20,14 @@ segunda fase, programar automáticamente el cargador en las horas más baratas.
   - P2: 0,016409 + 0,012858 = 0,029267
   - P3: 0,000077 + 0,003215 = 0,003292
 - Impuestos sobre el total: impuesto eléctrico 5,11269632 % e IVA 21 %.
-- Referencia de validación (octubre 2026): OMIE medio 165,25 €/MWh; precio
-  coste energía facturado 0,274447 (P1), 0,279393 (P2), 0,279020 (P3) €/kWh,
-  con consumos de 182, 240 y 840 kWh respectivamente.
+- OMIE medio de octubre 2026: 166,59 €/MWh (media simple de los 2980 cuartos
+  de hora del 01/10 al 31/10, ficheros marginalpdbc de OMIE, precio España).
+- Factura de octubre 2026 (periodo 01/10/2026–31/10/2026): precio coste
+  energía facturado 0,274447 (P1), 0,279393 (P2), 0,279020 (P3) €/kWh, con
+  consumos de 182, 240 y 840 kWh respectivamente. Feníe no desglosa SSAA,
+  pagos por capacidad, ROS&OM, pérdidas, FNEE ni tasa municipal, así que la
+  conciliación con la factura no es un test: queda pendiente hasta tener la
+  curva horaria de consumo y el token de ESIOS.
 
 ## Periodos horarios 2.0TD (Península)
 - P1 punta: laborables 10:00–14:00 y 18:00–22:00.

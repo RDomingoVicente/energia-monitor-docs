@@ -15,9 +15,42 @@ jobs:
       - name: Tests
         run: docker build --target test .
 
+  integration:
+    # Runner en modo host (sin services:): PostgreSQL con podman en 127.0.0.1 y
+    # puerto aleatorio; los tests corren en la imagen de test con red del host.
+    runs-on: wsl-win11
+    env:
+      PG_CONTAINER: em-ci-pg-${{ github.run_id }}-${{ github.run_attempt }}
+      TEST_IMAGE: localhost/em-ci-test:${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Arrancar PostgreSQL
+        run: |
+          podman run -d --name "$PG_CONTAINER" -e POSTGRES_PASSWORD=ci \
+            -p 127.0.0.1::5432 docker.io/library/postgres:17
+          PORT=$(podman port "$PG_CONTAINER" 5432/tcp | head -n1 | sed 's/.*://')
+          echo "PGPORT=$PORT" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if podman exec "$PG_CONTAINER" pg_isready -U postgres -h 127.0.0.1; then exit 0; fi
+            sleep 1
+          done
+          podman logs "$PG_CONTAINER"
+          exit 1
+      - name: Tests de integración
+        run: |
+          podman build --target test -t "$TEST_IMAGE" .
+          podman run --rm --network host \
+            -e PGHOST=127.0.0.1 -e PGPORT -e PGUSER=postgres -e PGPASSWORD=ci -e PGDATABASE=postgres \
+            "$TEST_IMAGE" pytest -q -rs -m integration
+      - name: Eliminar PostgreSQL e imagen de test
+        if: always()
+        run: |
+          podman rm -f "$PG_CONTAINER" || true
+          podman rmi -f "$TEST_IMAGE" || true
+
   image:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: [test, integration]
     runs-on: wsl-win11
     env:
       REGISTRY: ${{ vars.HARBOR_REGISTRY }}

@@ -7,8 +7,12 @@ Colector de precios + PostgreSQL + dashboard de Grafana. La fase 2
 (cargador Orbis Viaris) queda fuera hasta nuevo aviso.
 
 ## Estado
-Esqueleto inicial: el paquete `energia_monitor` solo contiene un proceso
-de espera y un test de humo. Todo lo demás está por implementar.
+Hechas: migraciones 0001–0006 (precios, contrato con vigencias, parámetros
+estimados, festivos y periodos, vista v_precio_final, rol grafana_ro), fuente
+OMIE, upsert de precios y tests (unitarios + integración con PostgreSQL).
+Pendiente: arranque y planificación del colector (`__main__` sigue siendo el
+proceso de espera), recarga de históricos, dashboard de Grafana y ESIOS.
+Tests de integración en local: definir PG* (PGHOST incluido) y `pytest -m integration`.
 
 ## Estructura
 - src/energia_monitor/   código del colector

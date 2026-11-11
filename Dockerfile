@@ -5,6 +5,8 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir .
+COPY db ./db
+ENV MIGRATIONS_DIR=/app/db/migrations
 
 # Etapa de tests: docker build --target test .
 FROM base AS test
