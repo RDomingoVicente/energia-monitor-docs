@@ -1,0 +1,39 @@
+name: energia-monitor
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-energia}
+      POSTGRES_USER: ${POSTGRES_USER:-energia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definir POSTGRES_PASSWORD en .env}
+      TZ: Europe/Madrid
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    ports:
+      # Por defecto solo accesible desde el propio NAS.
+      # Si Grafana corre en otra máquina del tailnet, poner en PG_BIND la IP
+      # de Tailscale del NAS.
+      - "${PG_BIND:-127.0.0.1}:${PG_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  collector:
+    image: ${HARBOR_REGISTRY:?definir HARBOR_REGISTRY en .env}/${HARBOR_PROJECT:-energia}/collector:${COLLECTOR_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-energia}
+      PGUSER: ${POSTGRES_USER:-energia}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PRICE_SOURCE: ${PRICE_SOURCE:-omie}
+      ESIOS_TOKEN: ${ESIOS_TOKEN:-}
+      TZ: Europe/Madrid
