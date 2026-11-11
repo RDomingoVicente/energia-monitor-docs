@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     # Ajustar a la etiqueta de tu runner si no es ubuntu-latest
-    runs-on: ubuntu-latest
+    runs-on: wsl-win11
     steps:
       - uses: actions/checkout@v4
       - name: Tests
@@ -18,7 +18,7 @@ jobs:
   image:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: wsl-win11
     env:
       REGISTRY: ${{ vars.HARBOR_REGISTRY }}
       PROJECT: ${{ vars.HARBOR_PROJECT }}
