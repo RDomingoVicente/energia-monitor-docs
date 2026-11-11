@@ -42,6 +42,23 @@ Comprobación desde el contenedor de Grafana:
 
     docker exec <contenedor-grafana> getent hosts energia-db
 
-## Dashboard
+## 3. Dashboard
 
-Pendiente (JSON en este directorio).
+`energia-monitor.json` (Grafana 10.4, plugin `grafana-postgresql-datasource`).
+
+Importar: Dashboards → New → Import → Upload dashboard JSON file. Arriba se
+elige el datasource (variable `ds`), el contrato y la fuente. Rango por
+defecto: hoy y mañana (zona Europe/Madrid).
+
+| Panel | Qué muestra |
+|-------|-------------|
+| Precio final ahora / OMIE ahora / Periodo | Tramo actual |
+| Precio final medio | Media de hoy y de mañana (mañana, tras publicar OMIE) |
+| Precio final (€/kWh) y OMIE (€/MWh) | Curvas por tramo de 15 min en el rango elegido |
+| Horas más baratas (próximas 36 h) | 12 horas con menor precio final medio |
+| Media diaria | Últimos 30 días |
+| Mes en curso | Media hasta ahora (simple, no ponderada por consumo) |
+| Componentes del tramo actual | Parámetros estimados y los que falten |
+
+El JSON está en el repositorio: los cambios hechos en la interfaz de Grafana
+se exportan (Share → Export) y se guardan aquí.
