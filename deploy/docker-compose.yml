@@ -12,10 +12,15 @@ services:
     volumes:
       - ./pgdata:/var/lib/postgresql/data
     ports:
-      # Por defecto solo accesible desde el propio NAS.
-      # Si Grafana corre en otra máquina del tailnet, poner en PG_BIND la IP
-      # de Tailscale del NAS.
+      # Solo para acceso desde el propio NAS (psql, copias). Grafana no usa
+      # este puerto: entra por la red energia-monitor_default como
+      # energia-db:5432 (ver grafana/README.md).
       - "${PG_BIND:-127.0.0.1}:${PG_PORT:-5434}:5432"
+    networks:
+      default:
+        # Nombre inequívoco para otros stacks unidos a esta red (el stack de
+        # Odoo puede tener su propio servicio "db").
+        aliases: [energia-db]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -41,3 +46,8 @@ services:
       HORARIOS: ${HORARIOS:-13:30,17:30,20:30}
       INTERVALO_DESCARGAS_S: ${INTERVALO_DESCARGAS_S:-1}
       TZ: Europe/Madrid
+
+networks:
+  default:
+    # Nombre fijo: el stack de Grafana se une a ella como red externa.
+    name: energia-monitor_default
