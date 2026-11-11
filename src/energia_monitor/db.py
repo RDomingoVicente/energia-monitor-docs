@@ -22,7 +22,11 @@ def directorio_migraciones() -> Path:
 
 
 def conectar(**kwargs: object) -> psycopg.Connection:
-    """Conexión con PGHOST, PGPORT, PGDATABASE, PGUSER y PGPASSWORD."""
+    """Conexión con PGHOST, PGPORT, PGDATABASE, PGUSER y PGPASSWORD.
+
+    En autocommit: cada operación que lo necesita abre su propia transacción.
+    """
+    kwargs.setdefault("autocommit", True)
     return psycopg.connect(**kwargs)  # type: ignore[arg-type]
 
 

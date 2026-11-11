@@ -17,6 +17,28 @@ log = logging.getLogger(__name__)
 USER_AGENT = f"energia-monitor/{__version__} (colector de precios del mercado electrico)"
 
 
+class Limitador:
+    """Garantiza un intervalo mínimo entre peticiones consecutivas."""
+
+    def __init__(
+        self,
+        intervalo: float,
+        reloj: Callable[[], float] = time.monotonic,
+        dormir: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.intervalo = intervalo
+        self._reloj = reloj
+        self._dormir = dormir
+        self._ultima: float | None = None
+
+    def esperar(self) -> None:
+        if self._ultima is not None:
+            pendiente = self._ultima + self.intervalo - self._reloj()
+            if pendiente > 0:
+                self._dormir(pendiente)
+        self._ultima = self._reloj()
+
+
 class ClienteHttp:
     """GET con reintentos y espera exponencial.
 
@@ -32,6 +54,7 @@ class ClienteHttp:
         user_agent: str = USER_AGENT,
         dormir: Callable[[float], None] = time.sleep,
         abrir: Callable[..., Any] = urllib.request.urlopen,
+        limitador: Limitador | None = None,
     ) -> None:
         if reintentos < 1:
             raise ValueError("reintentos debe ser >= 1")
@@ -41,10 +64,13 @@ class ClienteHttp:
         self.user_agent = user_agent
         self._dormir = dormir
         self._abrir = abrir
+        self._limitador = limitador
 
     def get(self, url: str) -> bytes | None:
         ultimo_error: Exception | None = None
         for intento in range(1, self.reintentos + 1):
+            if self._limitador is not None:
+                self._limitador.esperar()
             peticion = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
             try:
                 with self._abrir(peticion, timeout=self.timeout) as respuesta:

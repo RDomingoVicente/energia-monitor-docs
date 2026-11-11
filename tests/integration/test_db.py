@@ -213,8 +213,8 @@ def test_vista_vivienda_octubre_con_estimados(conn: psycopg.Connection, octubre_
         # Sin parámetros del contrato antes de 2026.
         ("2025-11-03 09:00Z", {"cargo", "fnee", "impuesto_electrico", "iva", "pagos_capacidad",
                                "peaje", "rfe", "rom", "ros", "ssaa", "tasa_municipal"}),
-        # Diciembre de 2026: aún sin estimación mensual de SSAA.
-        ("2026-12-15 09:00Z", {"ssaa"}),
+        # Febrero de 2026: sin estimado de SSAA ni FNEE anterior a la Orden TED/133/2026.
+        ("2026-02-10 09:00Z", {"fnee", "ssaa"}),
     ],
 )
 def test_vista_null_si_falta_parametro(conn: psycopg.Connection, inicio: str, pendientes: set[str]) -> None:
@@ -249,3 +249,11 @@ def test_grafana_ro_solo_lectura(conn: psycopg.Connection, nombre_bd: str, octub
                 ro.execute("DELETE FROM precio_mercado")
     finally:
         conn.execute("DROP TABLE tabla_futura")
+
+
+def test_ssaa_de_noviembre_con_vigencia_abierta(conn: psycopg.Connection) -> None:
+    filas = conn.execute(
+        "SELECT vigencia::text, valor FROM contrato_parametro"
+        " WHERE contrato = 'vivienda' AND clave = 'ssaa' ORDER BY vigencia"
+    ).fetchall()
+    assert filas == [("[2026-10-01,2026-11-01)", D("31.5")), ("[2026-11-01,)", D("31.5"))]

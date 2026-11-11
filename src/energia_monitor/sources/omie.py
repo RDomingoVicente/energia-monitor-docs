@@ -12,15 +12,14 @@ Verificado contra www.omie.es (11/11/2026):
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Protocol
-from zoneinfo import ZoneInfo
 
 from energia_monitor.http import ClienteHttp
 from energia_monitor.sources.base import ErrorFuente, PrecioTramo, PreciosDia
+from energia_monitor.tiempo import limites_dia_utc
 
-MADRID = ZoneInfo("Europe/Madrid")
 URL = "https://www.omie.es/es/file-download?parents=marginalpdbc&filename=marginalpdbc_{dia:%Y%m%d}.{version}"
 CABECERA = "MARGINALPDBC"
 RESOLUCIONES = (timedelta(minutes=15), timedelta(minutes=60))
@@ -28,14 +27,6 @@ RESOLUCIONES = (timedelta(minutes=15), timedelta(minutes=60))
 
 class Descargador(Protocol):
     def get(self, url: str) -> bytes | None: ...
-
-
-def limites_dia_utc(dia: date) -> tuple[datetime, datetime]:
-    """Inicio y fin en UTC del día civil de Madrid (23, 24 o 25 h)."""
-    inicio = datetime(dia.year, dia.month, dia.day, tzinfo=MADRID).astimezone(UTC)
-    siguiente = dia + timedelta(days=1)
-    fin = datetime(siguiente.year, siguiente.month, siguiente.day, tzinfo=MADRID).astimezone(UTC)
-    return inicio, fin
 
 
 def parsear_marginalpdbc(texto: str, dia: date) -> tuple[PrecioTramo, ...]:

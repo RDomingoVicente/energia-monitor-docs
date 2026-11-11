@@ -7,11 +7,14 @@ Colector de precios + PostgreSQL + dashboard de Grafana. La fase 2
 (cargador Orbis Viaris) queda fuera hasta nuevo aviso.
 
 ## Estado
-Hechas: migraciones 0001–0006 (precios, contrato con vigencias, parámetros
+Hechas: migraciones 0001–0007 (precios, contrato con vigencias, parámetros
 estimados, festivos y periodos, vista v_precio_final, rol grafana_ro), fuente
 OMIE, upsert de precios y tests (unitarios + integración con PostgreSQL).
-Pendiente: arranque y planificación del colector (`__main__` sigue siendo el
-proceso de espera), recarga de históricos, dashboard de Grafana y ESIOS.
+Colector: `python -m energia_monitor [ejecutar|migrar|recargar]`; al arrancar
+migra y descarga los días que falten desde CARGA_INICIAL_DESDE, y después
+actualiza hoy y mañana en HORARIOS (13:30, 17:30, 20:30 Madrid).
+Pendiente: dashboard de Grafana y ESIOS. SSAA y ROS son estimados (SSAA con
+vigencia abierta desde 11/2026) hasta tener la serie de ESIOS.
 Tests de integración en local: definir PG* (PGHOST incluido) y `pytest -m integration`.
 
 ## Estructura
@@ -37,6 +40,11 @@ Tests de integración en local: definir PG* (PGHOST incluido) y `pytest -m integ
   aplica al calcular periodos tarifarios y al presentar.
 - Inserciones idempotentes (upsert por tramo y fuente).
 - Parámetros del contrato en tabla con vigencia, nunca como constantes.
+- Migraciones publicadas inmutables (desde el commit 5d79781): cualquier
+  cambio va en una migración nueva. tests/test_migraciones.py guarda el hash
+  de cada una; al publicar una nueva, añadir su hash.
+- Valores de parámetros en el NAS: `python -m energia_monitor parametro
+  registrar|listar` o SQL, según docs/parametros.md (sin versión nueva).
 - Usuario de solo lectura para Grafana, creado por migración.
 - Secretos solo por variables de entorno; .env fuera de git.
 - No inventar endpoints ni identificadores de indicadores: verificarlos
