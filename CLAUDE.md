@@ -7,7 +7,7 @@ Colector de precios + PostgreSQL + dashboard de Grafana. La fase 2
 (cargador Orbis Viaris) queda fuera hasta nuevo aviso.
 
 ## Estado
-Hechas: migraciones 0001–0007 (precios, contrato con vigencias, parámetros
+Hechas: migraciones 0001–0008 (precios, contrato con vigencias, parámetros
 estimados, festivos y periodos, vista v_precio_final, rol grafana_ro), fuente
 OMIE, upsert de precios y tests (unitarios + integración con PostgreSQL).
 Colector: `python -m energia_monitor [ejecutar|migrar|recargar]`; al arrancar

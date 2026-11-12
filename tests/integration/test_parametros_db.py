@@ -25,9 +25,10 @@ def vigencias(conn: psycopg.Connection, clave: str = "ssaa") -> list[tuple[str, 
     ).fetchall()
 
 
-def registrar(conn: psycopg.Connection, desde: date, valor: str, clave: str = "ssaa", periodo: str = "*"):
+def registrar(conn: psycopg.Connection, desde: date, valor: str, clave: str = "ssaa", periodo: str = "*",
+              origen: str = "estimado"):
     return registrar_parametro(conn, contrato="param", clave=clave, periodo=periodo, desde=desde,
-                               valor=D(valor), estimado=True, fuente="test")
+                               valor=D(valor), origen=origen, fuente="test")
 
 
 def test_registrar_cierra_la_vigencia_anterior(conn: psycopg.Connection, contrato_param: str) -> None:
@@ -66,4 +67,10 @@ def test_registrar_valida_periodo_con_el_trigger(conn: psycopg.Connection, contr
 def test_listar(conn: psycopg.Connection, contrato_param: str) -> None:
     registrar(conn, date(2026, 11, 1), "31.5")
     filas = listar_parametros(conn, "param", date(2026, 11, 12))
-    assert filas == [("ssaa", "*", D("31.5"), "EUR/MWh", True, "[2026-11-01,)", "test")]
+    assert filas == [("ssaa", "*", D("31.5"), "EUR/MWh", "estimado", "[2026-11-01,)", "test")]
+
+
+def test_registrar_origen_no_valido(conn: psycopg.Connection, contrato_param: str) -> None:
+    with pytest.raises(ErrorParametro, match="origen no válido"):
+        registrar(conn, date(2026, 11, 1), "31.5", origen="norma")
+    assert vigencias(conn) == []

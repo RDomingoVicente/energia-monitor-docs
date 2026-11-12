@@ -722,7 +722,7 @@
       "id": 10,
       "type": "stat",
       "title": "Componentes del tramo actual",
-      "description": "Estimados: parámetros sin serie real (SSAA, ROS...) tomados de normas o estimaciones; ver docs/parametros.md. Sin valor: si aparece alguno, el precio final no se puede calcular.",
+      "description": "Estimados: aproximaciones sin norma ni serie todavía (SSAA, ROS); los valores de contrato y los regulados por norma no se listan. Ver docs/parametros.md. Sin valor: si aparece alguno, el precio final no se puede calcular.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
@@ -743,7 +743,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  coalesce(nullif(array_to_string(componentes_estimados, ', '), ''), 'ninguno') AS \"Estimados\",\n  coalesce(nullif(array_to_string(componentes_pendientes, ', '), ''), 'ninguno') AS \"Sin valor\"\nFROM v_precio_final\nWHERE contrato = '$contrato' AND fuente = '$fuente' AND inicio <= now() AND fin > now()"
+          "rawSql": "SELECT\n  coalesce(nullif(array_to_string(componentes_estimados, ', '), ''), 'ninguno') AS \"Estimados\",\n  coalesce(nullif(array_to_string(componentes_sin_valor, ', '), ''), 'ninguno') AS \"Sin valor\"\nFROM v_precio_final\nWHERE contrato = '$contrato' AND fuente = '$fuente' AND inicio <= now() AND fin > now()"
         }
       ],
       "fieldConfig": {
@@ -787,5 +787,5 @@
       }
     }
   ],
-  "version": 2
+  "version": 3
 }

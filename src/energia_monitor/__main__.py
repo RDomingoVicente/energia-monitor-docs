@@ -45,7 +45,8 @@ def _parser() -> argparse.ArgumentParser:
     registrar.add_argument("--periodo", default="*", help="'*' o P1..P6 según la clave")
     registrar.add_argument("--desde", type=date.fromisoformat, required=True)
     registrar.add_argument("--valor", type=Decimal, required=True, help="en la unidad de la clave")
-    registrar.add_argument("--estimado", action="store_true")
+    registrar.add_argument("--origen", required=True, choices=parametros.ORIGENES,
+                           help="contrato (pactado), regulado (norma publicada) o estimado")
     registrar.add_argument("--fuente", required=True)
     registrar.add_argument("--nota")
     listar = sub_param.add_parser("listar", help="parámetros vigentes en una fecha")
@@ -59,17 +60,16 @@ def _parametro(args: argparse.Namespace) -> int:
         if args.accion == "listar":
             fecha = args.fecha or hoy_madrid()
             print(f"Parámetros de {args.contrato} vigentes el {fecha}:")
-            for clave, periodo, valor, unidad, estimado, vigencia, fuente in parametros.listar_parametros(
+            for clave, periodo, valor, unidad, origen, vigencia, fuente in parametros.listar_parametros(
                 conn, args.contrato, fecha
             ):
-                marca = " (estimado)" if estimado else ""
-                texto = "pendiente" if valor is None else f"{valor} {unidad}"
-                print(f"  {clave:<19} {periodo:<3} {texto}{marca}  {vigencia}  [{fuente}]")
+                texto = "sin valor" if valor is None else f"{valor} {unidad}"
+                print(f"  {clave:<19} {periodo:<3} {origen:<9} {texto}  {vigencia}  [{fuente}]")
             return 0
         try:
             registro = parametros.registrar_parametro(
                 conn, contrato=args.contrato, clave=args.clave, periodo=args.periodo, desde=args.desde,
-                valor=args.valor, estimado=args.estimado, fuente=args.fuente, nota=args.nota,
+                valor=args.valor, origen=args.origen, fuente=args.fuente, nota=args.nota,
             )
         except parametros.ErrorParametro as e:
             log.error("%s", e)

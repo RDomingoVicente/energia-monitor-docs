@@ -14,6 +14,13 @@ Reglas:
   pagos_capacidad y perdidas. Lo valida un trigger.
 - Las unidades son las del catálogo `parametro_clave` (€/MWh, €/kWh o
   fracción: 21 % se escribe 0.21).
+- Cada valor lleva su origen (`--origen`):
+  - `contrato`: pactado con la comercializadora (RFE).
+  - `regulado`: fijado por una norma publicada (peajes, cargos, impuestos,
+    pérdidas, pagos por capacidad, ROM, FNEE, tasa municipal).
+  - `estimado`: aproximación sin norma ni serie (hoy SSAA y ROS).
+  Un valor desconocido se deja sin valor (NULL, solo con `regulado` o
+  `estimado`) y el precio final de esas fechas queda vacío.
 - Un cambio de esquema o de datos de referencia que deba reproducirse en
   instalaciones nuevas va en una migración nueva (las publicadas son
   inmutables). El CLI y el SQL de abajo son para mantener los valores de la
@@ -28,7 +35,7 @@ En el NAS, desde /volume1/docker/energia-monitor:
 
     # Nuevo estimado de SSAA desde el 1 de enero de 2027
     docker compose exec collector python -m energia_monitor parametro registrar \
-        --clave ssaa --desde 2027-01-01 --valor 28.0 --estimado \
+        --clave ssaa --desde 2027-01-01 --valor 28.0 --origen estimado \
         --fuente "Estimación a partir de referencias de prensa" \
         --nota "Aproximado; sustituir por la serie de ESIOS"
 
@@ -50,8 +57,8 @@ UPDATE contrato_parametro
    AND vigencia @> DATE '2027-01-01';
 
 -- 2. Añadir el nuevo valor con vigencia abierta.
-INSERT INTO contrato_parametro (contrato, clave, periodo, vigencia, valor, estimado, fuente, nota)
-VALUES ('vivienda', 'ssaa', '*', daterange(DATE '2027-01-01', NULL, '[)'), 28.0, true,
+INSERT INTO contrato_parametro (contrato, clave, periodo, vigencia, valor, origen, fuente, nota)
+VALUES ('vivienda', 'ssaa', '*', daterange(DATE '2027-01-01', NULL, '[)'), 28.0, 'estimado',
         'Estimación a partir de referencias de prensa',
         'Aproximado; sustituir por la serie de ESIOS');
 

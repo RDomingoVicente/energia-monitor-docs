@@ -46,11 +46,11 @@ def test_migraciones_aplicadas_y_repetibles(conn: psycopg.Connection, migracione
 
 
 def insertar_parametro(conn: psycopg.Connection, clave: str, periodo: str, vigencia: str,
-                       valor: object, estimado: bool = False, contrato: str = "vivienda") -> None:
+                       valor: object, origen: str = "regulado", contrato: str = "vivienda") -> None:
     conn.execute(
-        "INSERT INTO contrato_parametro (contrato, clave, periodo, vigencia, valor, estimado, fuente)"
+        "INSERT INTO contrato_parametro (contrato, clave, periodo, vigencia, valor, origen, fuente)"
         " VALUES (%s, %s, %s, %s::daterange, %s, %s, 'test')",
-        (contrato, clave, periodo, vigencia, valor, estimado),
+        (contrato, clave, periodo, vigencia, valor, origen),
     )
 
 
@@ -66,9 +66,32 @@ def test_periodo_asterisco_solo_en_claves_sin_periodo(conn: psycopg.Connection) 
         insertar_parametro(conn, "rfe", "P1", "[2030-01-01,)", 20)
 
 
-def test_valor_pendiente_solo_si_estimado(conn: psycopg.Connection) -> None:
-    with pytest.raises(errors.CheckViolation):
-        insertar_parametro(conn, "iva", "*", "[2030-01-01,)", None, estimado=False)
+def test_valor_de_contrato_obligatorio(conn: psycopg.Connection) -> None:
+    with pytest.raises(errors.CheckViolation, match="contrato_con_valor"):
+        insertar_parametro(conn, "rfe", "*", "[2030-01-01,)", None, origen="contrato")
+
+
+def test_origen_no_valido(conn: psycopg.Connection) -> None:
+    with pytest.raises(errors.CheckViolation, match="origen_valido"):
+        insertar_parametro(conn, "iva", "*", "[2030-01-01,)", 0.21, origen="norma")
+
+
+def test_origen_de_los_parametros_cargados(conn: psycopg.Connection) -> None:
+    filas = conn.execute(
+        "SELECT origen, array_agg(DISTINCT clave ORDER BY clave) FROM contrato_parametro"
+        " WHERE contrato = 'vivienda' GROUP BY origen ORDER BY origen"
+    ).fetchall()
+    assert filas == [
+        ("contrato", ["rfe"]),
+        ("estimado", ["ros", "ssaa"]),
+        ("regulado", ["cargo", "fnee", "impuesto_electrico", "iva", "pagos_capacidad",
+                      "peaje", "perdidas", "rom", "tasa_municipal"]),
+    ]
+    # El FNEE anterior a la Orden TED/133/2026 es regulado, pero sin valor.
+    assert conn.execute(
+        "SELECT origen, valor FROM contrato_parametro WHERE contrato = 'vivienda'"
+        " AND clave = 'fnee' AND vigencia @> DATE '2026-02-01'"
+    ).fetchone() == ("regulado", None)
 
 
 def test_vigencia_sin_inicio_rechazada(conn: psycopg.Connection) -> None:
@@ -168,14 +191,14 @@ def contrato_prueba(conn: psycopg.Connection) -> None:
                 insertar_parametro(conn, clave, periodo, vigencia, getattr(p, clave), contrato="prueba")
         else:
             insertar_parametro(conn, clave, "*", vigencia, getattr(PARAMETROS_PRUEBA["P1"], clave),
-                               contrato="prueba")
+                               origen="contrato" if clave == "rfe" else "regulado", contrato="prueba")
 
 
 def test_vista_igual_a_referencia_python(conn: psycopg.Connection, octubre_cargado: None,
                                          contrato_prueba: None) -> None:
     filas = conn.execute(
         "SELECT periodo, omie_eur_mwh, energia_eur_kwh, coste_sin_impuestos_eur_kwh,"
-        "       precio_final_eur_kwh, componentes_pendientes, componentes_estimados,"
+        "       precio_final_eur_kwh, componentes_sin_valor, componentes_estimados,"
         "       incluye_estimados"
         " FROM v_precio_final WHERE contrato = 'prueba' AND fuente = 'omie'"
         "   AND inicio >= '2026-09-30 22:00Z' AND inicio < '2026-10-31 23:00Z'"
@@ -197,14 +220,15 @@ def test_vista_igual_a_referencia_python(conn: psycopg.Connection, octubre_carga
 def test_vista_vivienda_octubre_con_estimados(conn: psycopg.Connection, octubre_cargado: None) -> None:
     fila = conn.execute(
         "SELECT count(*), count(precio_final_eur_kwh),"
+        "       array_agg(DISTINCT array_to_string(componentes_regulados, ',')),"
         "       array_agg(DISTINCT array_to_string(componentes_estimados, ',')),"
-        "       array_agg(DISTINCT array_to_string(componentes_pendientes, ',')),"
+        "       array_agg(DISTINCT array_to_string(componentes_sin_valor, ',')),"
         "       bool_and(incluye_estimados)"
         " FROM v_precio_final WHERE contrato = 'vivienda' AND fuente = 'omie'"
         "   AND inicio >= '2026-09-30 22:00Z' AND inicio < '2026-10-31 23:00Z'"
     ).fetchone()
-    estimados = "fnee,pagos_capacidad,perdidas,rom,ros,ssaa,tasa_municipal"
-    assert fila == (2980, 2980, [estimados], [""], True)
+    regulados = "cargo,fnee,impuesto_electrico,iva,pagos_capacidad,peaje,perdidas,rom,tasa_municipal"
+    assert fila == (2980, 2980, [regulados], ["ros,ssaa"], [""], True)
 
 
 @pytest.mark.parametrize(
@@ -225,7 +249,7 @@ def test_vista_null_si_falta_parametro(conn: psycopg.Connection, inicio: str, pe
     )
     try:
         final, faltan = conn.execute(
-            "SELECT precio_final_eur_kwh, componentes_pendientes FROM v_precio_final"
+            "SELECT precio_final_eur_kwh, componentes_sin_valor FROM v_precio_final"
             " WHERE contrato = 'vivienda' AND fuente = 'test'"
         ).fetchone()  # type: ignore[misc]
         assert final is None

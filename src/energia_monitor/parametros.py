@@ -17,6 +17,9 @@ from decimal import Decimal
 import psycopg
 
 
+ORIGENES = ("contrato", "regulado", "estimado")
+
+
 class ErrorParametro(Exception):
     pass
 
@@ -35,12 +38,14 @@ def registrar_parametro(
     periodo: str,
     desde: date,
     valor: Decimal,
-    estimado: bool,
+    origen: str,
     fuente: str,
     nota: str | None = None,
 ) -> Registro:
     if not fuente.strip():
         raise ErrorParametro("la fuente es obligatoria")
+    if origen not in ORIGENES:
+        raise ErrorParametro(f"origen no válido: {origen!r} (usa {', '.join(ORIGENES)})")
     with conn.transaction():
         filtro = (contrato, clave, periodo)
         conn.execute(
@@ -73,19 +78,19 @@ def registrar_parametro(
         ).fetchone()
         hasta = siguiente[0] if siguiente else None
         fila = conn.execute(
-            "INSERT INTO contrato_parametro (contrato, clave, periodo, vigencia, valor, estimado, fuente, nota)"
+            "INSERT INTO contrato_parametro (contrato, clave, periodo, vigencia, valor, origen, fuente, nota)"
             " VALUES (%s, %s, %s, daterange(%s::date, %s::date, '[)'), %s, %s, %s, %s)"
             " RETURNING vigencia::text",
-            (*filtro, desde, hasta, valor, estimado, fuente, nota),
+            (*filtro, desde, hasta, valor, origen, fuente, nota),
         ).fetchone()
         assert fila is not None
         return Registro(cerrada=cerrada, nueva=fila[0])
 
 
 def listar_parametros(conn: psycopg.Connection, contrato: str, fecha: date) -> list[tuple]:
-    """Parámetros vigentes en la fecha: (clave, periodo, valor, unidad, estimado, vigencia, fuente)."""
+    """Parámetros vigentes en la fecha: (clave, periodo, valor, unidad, origen, vigencia, fuente)."""
     return conn.execute(
-        "SELECT cp.clave, cp.periodo, cp.valor, pc.unidad, cp.estimado, cp.vigencia::text, cp.fuente"
+        "SELECT cp.clave, cp.periodo, cp.valor, pc.unidad, cp.origen, cp.vigencia::text, cp.fuente"
         " FROM contrato_parametro cp JOIN parametro_clave pc USING (clave)"
         " WHERE cp.contrato = %s AND cp.vigencia @> %s::date"
         " ORDER BY cp.clave, cp.periodo",
