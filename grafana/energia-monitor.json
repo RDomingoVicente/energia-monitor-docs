@@ -269,7 +269,7 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
+          "fields": "/.*/",
           "values": false
         },
         "colorMode": "none",
@@ -423,7 +423,7 @@
         "x": 0,
         "y": 13,
         "w": 12,
-        "h": 9
+        "h": 14
       },
       "targets": [
         {
@@ -486,7 +486,7 @@
         "x": 12,
         "y": 13,
         "w": 12,
-        "h": 9
+        "h": 14
       },
       "targets": [
         {
@@ -498,7 +498,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  min(inicio) AS \"Hora\",\n  min(periodo) AS \"Periodo\",\n  avg(omie_eur_mwh) AS \"OMIE (€/MWh)\",\n  avg(precio_final_eur_kwh) AS \"Precio final (€/kWh)\"\nFROM v_precio_final\nWHERE contrato = '$contrato' AND fuente = '$fuente' AND fin > now() AND inicio < now() + interval '36 hours'\nGROUP BY date_trunc('hour', inicio)\nORDER BY avg(precio_final_eur_kwh) NULLS LAST, 1\nLIMIT 12"
+          "rawSql": "WITH horas AS (\n  -- Hora UTC: en España el desfase es de horas enteras, así que cada hora UTC es\n  -- una hora local, y el día del cambio de hora las dos 02:00 no se mezclan.\n  SELECT\n    date_trunc('hour', inicio AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS hora,\n    min(periodo) AS periodo,\n    avg(omie_eur_mwh) AS omie,\n    avg(precio_final_eur_kwh) AS precio_final\n  FROM v_precio_final\n  WHERE contrato = '$contrato' AND fuente = '$fuente' AND inicio >= now() - interval '1 hour' AND inicio < now() + interval '37 hours'\n  GROUP BY 1\n)\n-- Horas completas (los cuatro cuartos) que aún no han terminado.\nSELECT hora AS \"Hora\", periodo AS \"Periodo\", omie AS \"OMIE (€/MWh)\", precio_final AS \"Precio final (€/kWh)\"\nFROM horas\nWHERE hora + interval '1 hour' > now() AND hora < now() + interval '36 hours'\nORDER BY precio_final NULLS LAST, hora\nLIMIT 12"
         }
       ],
       "fieldConfig": {
@@ -568,7 +568,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 27,
         "w": 16,
         "h": 8
       },
@@ -632,7 +632,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 22,
+        "y": 27,
         "w": 8,
         "h": 8
       },
@@ -729,7 +729,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 30,
+        "y": 35,
         "w": 24,
         "h": 3
       },
@@ -770,7 +770,7 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
+          "fields": "/.*/",
           "values": false
         },
         "colorMode": "none",
@@ -779,9 +779,13 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "wideLayout": true,
-        "showPercentChange": false
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 18
+        }
       }
     }
   ],
-  "version": 1
+  "version": 2
 }

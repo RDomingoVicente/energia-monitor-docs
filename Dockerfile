@@ -11,6 +11,8 @@ ENV MIGRATIONS_DIR=/app/db/migrations
 # Etapa de tests: docker build --target test .
 FROM base AS test
 COPY tests ./tests
+# Los tests validan el dashboard; la imagen de ejecución no lo incluye.
+COPY grafana ./grafana
 RUN pip install --no-cache-dir pytest && pytest -q
 
 # Etapa de ejecución (por defecto)
