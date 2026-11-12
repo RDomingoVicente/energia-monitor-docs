@@ -59,9 +59,9 @@ defecto: hoy y mañana (zona Europe/Madrid).
 | Media diaria | Últimos 30 días |
 | Mes en curso | Media hasta ahora (simple, no ponderada por consumo) |
 | Componentes del tramo actual | Parámetros estimados y los que falten |
-| PVPC 2.0TD frente a mi precio | Curva horaria del PVPC (ESIOS 1001) y del precio final, con impuestos |
-| PVPC: mes en curso | Medias simples del mes y diferencia (positiva: el contrato es más caro) |
-| Diferencia diaria con el PVPC | Últimos 30 días |
+| PVPC 2.0TD frente a mi precio | Curva horaria del PVPC (ESIOS 1001) y del precio final; ambos con IEE e IVA |
+| PVPC: mes en curso | Medias simples del mes y diferencia, ambos con IEE e IVA (positiva: el contrato es más caro) |
+| Diferencia diaria con el PVPC | Últimos 30 días, ambos con IEE e IVA |
 | Estado de los componentes | Real, estimado, regulado o contrato en el tramo actual |
 | Origen de SSAA por día | Últimos 10 días y mañana: esios, prevision_ree, perfil_14d o parametro |
 

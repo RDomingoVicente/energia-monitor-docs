@@ -789,8 +789,8 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "PVPC 2.0TD frente a mi precio (€/kWh)",
-      "description": "Por hora, con IEE e IVA del contrato aplicados a ambos. PVPC: indicador 1001 de ESIOS (término de energía con peajes y cargos). Mi precio: media de los cuatro tramos de la hora.",
+      "title": "PVPC 2.0TD frente a mi precio (€/kWh, ambos con IEE e IVA)",
+      "description": "Por hora. Mi precio: precio final (media de los cuatro tramos de la hora). PVPC: indicador 1001 de ESIOS (término de energía con peajes y cargos) × (1 + IEE) × (1 + IVA) del contrato. Los dos lados con impuestos.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
@@ -882,8 +882,8 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "PVPC: mes en curso (media hasta ahora)",
-      "description": "Media simple de las horas del mes hasta ahora, con impuestos; no está ponderada por consumo. Diferencia positiva: mi contrato es más caro que el PVPC.",
+      "title": "PVPC: mes en curso (€/kWh, ambos con IEE e IVA)",
+      "description": "Media simple de las horas del mes hasta ahora; no está ponderada por consumo. Los dos lados con IEE e IVA. Diferencia positiva: mi contrato es más caro que el PVPC.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
@@ -999,7 +999,7 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Diferencia diaria con el PVPC (€/kWh)",
+      "title": "Diferencia diaria con el PVPC (€/kWh, ambos con IEE e IVA)",
       "description": "Media diaria (hora de Madrid) de mi precio menos el PVPC, con impuestos, últimos 30 días. Positiva: mi contrato es más caro.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -1152,7 +1152,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  (inicio AT TIME ZONE 'Europe/Madrid')::date AS \"Día\",\n  string_agg(DISTINCT ssaa_metodo, ', ') AS \"Método\",\n  string_agg(DISTINCT ssaa_origen, ', ') AS \"Origen\",\n  avg(ssaa) AS \"SSAA medio (€/MWh)\",\n  avg(precio_final_eur_kwh) AS \"Precio final medio (€/kWh)\"\nFROM v_precio_final\nWHERE contrato = '$contrato' AND fuente = '$fuente'\n  AND inicio >= date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' - interval '10 days'\n  AND inicio < date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' + interval '2 days'\nGROUP BY 1\nORDER BY 1 DESC"
+          "rawSql": "SELECT\n  to_char((inicio AT TIME ZONE 'Europe/Madrid')::date, 'YYYY-MM-DD') AS \"Día\",\n  string_agg(DISTINCT ssaa_metodo, ', ') AS \"Método\",\n  string_agg(DISTINCT ssaa_origen, ', ') AS \"Origen\",\n  avg(ssaa) AS \"SSAA medio (€/MWh)\",\n  avg(precio_final_eur_kwh) AS \"Precio final medio (€/kWh)\"\nFROM v_precio_final\nWHERE contrato = '$contrato' AND fuente = '$fuente'\n  AND inicio >= date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' - interval '10 days'\n  AND inicio < date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' + interval '2 days'\nGROUP BY 1\nORDER BY 1 DESC"
         }
       ],
       "fieldConfig": {
@@ -1209,5 +1209,5 @@
       }
     }
   ],
-  "version": 4
+  "version": 5
 }

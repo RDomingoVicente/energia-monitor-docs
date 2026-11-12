@@ -513,3 +513,59 @@ def test_consultas_de_los_paneles_nuevos(conn: psycopg.Connection, dia_cargado: 
     assert "$" not in sql
     filas = conn.execute(sql).fetchall()
     assert filas and all(v is not None for v in filas[0])
+
+
+def sql_panel(panel_id: int, ahora: str, desde: str = "2026-11-01Z", hasta: str = "2026-11-12Z") -> str:
+    panel = next(p for p in DASHBOARD["panels"] if p["id"] == panel_id)
+    sql = (panel["targets"][0]["rawSql"]
+           .replace("$contrato", "vivienda").replace("$fuente", FUENTE)
+           .replace("now()", f"'{ahora}'::timestamptz")
+           .replace("$__timeFilter(inicio)", f"inicio BETWEEN '{desde}' AND '{hasta}'"))
+    assert "$" not in sql
+    return sql
+
+
+def test_paneles_pvpc_comparan_en_la_misma_base(conn: psycopg.Connection, dia_cargado: None) -> None:
+    """Los dos lados con IEE e IVA, recalculados por separado: precio final de
+    v_precio_final y PVPC del fixture real de 1001 × (1 + IEE) × (1 + IVA)."""
+    mercado(conn, DIA)
+    iee, iva = (conn.execute(
+        "SELECT valor FROM contrato_parametro WHERE contrato = 'vivienda' AND clave = %s"
+        " AND vigencia @> %s", (clave, DIA)).fetchone()[0] for clave in ("impuesto_electrico", "iva"))  # type: ignore[index]
+    impuestos = (1 + iee) * (1 + iva)
+    pvpc_sin = {v.inicio: v.valor / 1000 for v in serie_fixture(1001).valores}
+    pvpc_con = {h: v * impuestos for h, v in pvpc_sin.items()}
+    vista = filas_vista(conn, DIA)
+    mio_con = {h: sum(f["precio_final_eur_kwh"] for f in vista if h <= f["inicio"] < h + timedelta(hours=1)) / 4
+               for h in pvpc_sin}
+    mio_sin = {h: sum(f["coste_sin_impuestos_eur_kwh"] for f in vista if h <= f["inicio"] < h + timedelta(hours=1)) / 4
+               for h in pvpc_sin}
+
+    def media(valores: list[D]) -> D:
+        return sum(valores, D(0)) / len(valores)
+
+    # Curva horaria.
+    curva = conn.execute(sql_panel(11, "2026-11-10 12:05Z")).fetchall()
+    assert len(curva) == 24
+    for hora, mio, pvpc in curva:
+        assert (mio, pvpc) == (mio_con[hora], pvpc_con[hora])
+        assert mio != mio_sin[hora] and pvpc != pvpc_sin[hora]
+
+    # KPI del mes: todo el 10/11 (hora de Madrid) queda antes de "ahora".
+    mio, pvpc, diferencia = conn.execute(sql_panel(12, "2026-11-10 23:00Z")).fetchone()  # type: ignore[misc]
+    assert mio == media(list(mio_con.values()))
+    assert pvpc == media(list(pvpc_con.values()))
+    assert diferencia == media([mio_con[h] - pvpc_con[h] for h in pvpc_sin])
+    # Mezclar bases daría otra cifra: la diferencia no es "con impuestos - sin impuestos".
+    assert diferencia != media(list(mio_con.values())) - media(list(pvpc_sin.values()))
+
+    # Diferencia diaria.
+    ((_, diaria),) = conn.execute(sql_panel(13, "2026-11-10 23:00Z")).fetchall()
+    assert diaria == diferencia
+
+
+def test_origen_de_ssaa_por_dia_muestra_la_fecha_local(conn: psycopg.Connection, dia_cargado: None) -> None:
+    mercado(conn, DIA)
+    filas = conn.execute(sql_panel(15, "2026-11-11 12:05Z")).fetchall()
+    # Texto 'AAAA-MM-DD' (Grafana mostraría un date como instante UTC en hora local).
+    assert [(dia, metodo, origen) for dia, metodo, origen, *_ in filas] == [("2026-11-10", "esios", "real")]

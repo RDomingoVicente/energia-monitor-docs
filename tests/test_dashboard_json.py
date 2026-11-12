@@ -28,3 +28,14 @@ def test_tabla_de_horas_baratas_cabe_entera() -> None:
 def test_datasource_postgresql_de_grafana_10() -> None:
     for panel in DASHBOARD["panels"]:
         assert panel["datasource"]["type"] == "grafana-postgresql-datasource"
+
+
+@pytest.mark.parametrize("panel_id", [11, 12, 13])
+def test_paneles_pvpc_en_una_sola_base(panel_id: int) -> None:
+    # Ambos lados con IEE e IVA: nunca columnas sin impuestos en estos paneles.
+    panel = next(p for p in DASHBOARD["panels"] if p["id"] == panel_id)
+    sql = panel["targets"][0]["rawSql"]
+    assert "con IEE e IVA" in panel["title"]
+    assert "sin_impuestos" not in sql
+    assert re.findall(r"\b(\w+)_eur_kwh\b", sql) and set(re.findall(r"\b(\w+)_eur_kwh\b", sql)) <= {
+        "precio_final", "pvpc_final", "diferencia"}
