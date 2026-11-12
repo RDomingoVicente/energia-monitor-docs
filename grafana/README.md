@@ -59,6 +59,16 @@ defecto: hoy y mañana (zona Europe/Madrid).
 | Media diaria | Últimos 30 días |
 | Mes en curso | Media hasta ahora (simple, no ponderada por consumo) |
 | Componentes del tramo actual | Parámetros estimados y los que falten |
+| PVPC 2.0TD frente a mi precio | Curva horaria del PVPC (ESIOS 1001) y del precio final, con impuestos |
+| PVPC: mes en curso | Medias simples del mes y diferencia (positiva: el contrato es más caro) |
+| Diferencia diaria con el PVPC | Últimos 30 días |
+| Estado de los componentes | Real, estimado, regulado o contrato en el tramo actual |
+| Origen de SSAA por día | Últimos 10 días y mañana: esios, prevision_ree, perfil_14d o parametro |
+
+Los paneles de ESIOS necesitan `ESIOS_TOKEN` en el colector; sin él quedan
+vacíos y el resto del dashboard no cambia. Vistas: `v_comparacion_pvpc`
+(PVPC frente al contrato, por hora) y las columnas `ssaa_origen`,
+`ssaa_metodo` y `estado_componentes` de `v_precio_final`.
 
 El JSON está en el repositorio: los cambios hechos en la interfaz de Grafana
 se exportan (Share → Export) y se guardan aquí.

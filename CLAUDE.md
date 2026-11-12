@@ -7,14 +7,20 @@ Colector de precios + PostgreSQL + dashboard de Grafana. La fase 2
 (cargador Orbis Viaris) queda fuera hasta nuevo aviso.
 
 ## Estado
-Hechas: migraciones 0001–0008 (precios, contrato con vigencias, parámetros
-estimados, festivos y periodos, vista v_precio_final, rol grafana_ro), fuente
-OMIE, upsert de precios y tests (unitarios + integración con PostgreSQL).
-Colector: `python -m energia_monitor [ejecutar|migrar|recargar]`; al arrancar
-migra y descarga los días que falten desde CARGA_INICIAL_DESDE, y después
-actualiza hoy y mañana en HORARIOS (13:30, 17:30, 20:30 Madrid).
-Pendiente: dashboard de Grafana y ESIOS. SSAA y ROS son estimados (SSAA con
-vigencia abierta desde 11/2026) hasta tener la serie de ESIOS.
+Hechas: migraciones 0001–0009 (precios, contrato con vigencias, parámetros
+estimados, festivos y periodos, vista v_precio_final, rol grafana_ro, ESIOS),
+fuente OMIE, ESIOS (SSAA real por componentes, previsión 1871 y PVPC 1001),
+dashboard de Grafana y tests (unitarios + integración con PostgreSQL).
+Colector: `python -m energia_monitor [ejecutar|migrar|recargar|parametro|esios]`;
+al arrancar migra y descarga los días que falten desde CARGA_INICIAL_DESDE (y
+de ESIOS desde ESIOS_CARGA_DESDE si hay ESIOS_TOKEN); después actualiza OMIE en
+HORARIOS (13:30, 17:30, 20:30) y ESIOS en ESIOS_HORARIOS (08:30, 21:00, 22:00;
+recarga de 90 días los domingos) y recalcula la estimación de SSAA.
+SSAA: real de ESIOS (definición en contrato_ssaa_componente) > estimación
+(prevision_ree solo con la previsión 1871 verificada; si no, perfil_14d) >
+parámetro estimado. Indicadores y dudas abiertas en docs/contexto.md.
+Pendiente: ROS definitivo (parámetro, sin prioridad) y conciliar SSAA (duda de
+los desvíos) con una factura y la curva horaria de i-DE.
 Tests de integración en local: definir PG* (PGHOST incluido) y `pytest -m integration`.
 
 ## Estructura
@@ -32,8 +38,10 @@ Tests de integración en local: definir PG* (PGHOST incluido) y `pytest -m integ
 
 ## Convenciones
 - Python 3.12, dependencias mínimas, tipado y tests con pytest.
-- Fuentes de precios detrás de una interfaz común (fuente sin token ahora,
-  ESIOS cuando haya token), seleccionable con la variable PRICE_SOURCE.
+- Fuentes de precios detrás de una interfaz común, seleccionable con la
+  variable PRICE_SOURCE (omie). ESIOS (SSAA y PVPC) es aparte y opcional:
+  sin ESIOS_TOKEN el colector funciona igual que antes.
+- Indicadores de ESIOS en la tabla esios_indicador, no en el código.
 - Conexión a PostgreSQL con las variables estándar de libpq
   (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD).
 - Toda marca temporal en UTC (timestamptz); la zona Europe/Madrid solo se

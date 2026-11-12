@@ -1,16 +1,23 @@
-"""Bucle del servicio: arranque y ejecuciones diarias a horas fijas de Madrid."""
+"""Bucle del servicio: arranque y ejecuciones diarias a horas fijas de Madrid.
+
+Dos calendarios: OMIE (HORARIOS) y, si hay ESIOS_TOKEN, ESIOS
+(ESIOS_HORARIOS). Tras cualquier ejecución con ESIOS activo se recalcula la
+estimación de SSAA. Los domingos, la primera ejecución de ESIOS recarga los
+últimos 90 días para detectar revisiones de REE.
+"""
 
 from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Sequence
-from datetime import UTC, datetime, time, timedelta
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, date, datetime, time, timedelta
 
 import psycopg
 
-from energia_monitor import colector, db
+from energia_monitor import colector, db, esios, estimacion
 from energia_monitor.config import Config
+from energia_monitor.errores import ErrorAutenticacion
 from energia_monitor.sources.base import FuentePrecios
 from energia_monitor.tiempo import MADRID, hoy_madrid
 
@@ -29,6 +36,21 @@ def proxima_ejecucion(ahora: datetime, horarios: Sequence[time]) -> datetime:
     raise ValueError("sin horarios planificados")
 
 
+def proximas_tareas(ahora: datetime, planes: Mapping[str, Sequence[time]]) -> tuple[datetime, list[str]]:
+    """Siguiente instante planificado y las tareas que tocan en él."""
+    candidatas = {nombre: proxima_ejecucion(ahora, horarios) for nombre, horarios in planes.items() if horarios}
+    if not candidatas:
+        raise ValueError("sin horarios planificados")
+    siguiente = min(candidatas.values())
+    return siguiente, sorted(n for n, t in candidatas.items() if t == siguiente)
+
+
+def es_recarga_semanal(instante: datetime, horarios_esios: Sequence[time]) -> bool:
+    """Domingo, en la primera hora de ESIOS del día."""
+    local = instante.astimezone(MADRID)
+    return local.weekday() == 6 and local.time() == min(horarios_esios)
+
+
 def preparar_bd(conn: psycopg.Connection, config: Config) -> None:
     aplicadas = db.migrar(conn)
     log.info("migraciones aplicadas: %s", ", ".join(aplicadas) if aplicadas else "ninguna pendiente")
@@ -43,21 +65,71 @@ def ejecutar(
     stop: threading.Event,
     conectar: Callable[[], psycopg.Connection] = db.conectar,
     reloj: Callable[[], datetime] = lambda: datetime.now(UTC),
+    cliente_esios: esios.Cliente | None = None,
 ) -> None:
     """Arranque (migraciones y huecos) y después bucle de ejecuciones diarias."""
+    if cliente_esios is None:
+        log.info("ESIOS desactivado (sin ESIOS_TOKEN): SSAA con el parámetro estimado")
     with conectar() as conn:
         preparar_bd(conn, config)
         colector.completar_desde(conn, fuente, config.carga_inicial_desde, hoy_madrid(reloj()), stop)
+        if cliente_esios is not None and not stop.is_set():
+            cliente_esios = _tarea_esios(
+                lambda: esios.completar_desde(conn, cliente_esios, config.esios_carga_desde,  # type: ignore[arg-type]
+                                              hoy_madrid(reloj()), stop),
+                cliente_esios, "carga inicial de ESIOS",
+            )
+        if cliente_esios is not None and not stop.is_set():
+            _estimar(conn, hoy_madrid(reloj()))
 
     while not stop.is_set():
-        siguiente = proxima_ejecucion(reloj(), config.horarios)
-        log.info("próxima ejecución: %s", siguiente.isoformat())
+        planes = {"omie": config.horarios, "esios": config.esios_horarios if cliente_esios else ()}
+        siguiente, tareas = proximas_tareas(reloj(), planes)
+        log.info("próxima ejecución: %s (%s)", siguiente.isoformat(), ", ".join(tareas))
         espera = (siguiente - reloj()).total_seconds()
         if stop.wait(max(espera, 0)):
             break
         try:
             with conectar() as conn:
-                colector.actualizar_hoy_y_manana(conn, fuente, hoy_madrid(reloj()), stop)
+                hoy = hoy_madrid(reloj())
+                if "omie" in tareas:
+                    try:
+                        colector.actualizar_hoy_y_manana(conn, fuente, hoy, stop)
+                    except Exception:
+                        log.exception("fallo en la actualización de precios")
+                if "esios" in tareas and cliente_esios is not None:
+                    semanal = es_recarga_semanal(siguiente, config.esios_horarios)
+                    cliente = cliente_esios
+                    cliente_esios = _tarea_esios(
+                        lambda: esios.actualizar(
+                            conn, cliente, hoy, stop=stop,
+                            dias_atras=esios.DIAS_RECARGA_SEMANAL if semanal else esios.DIAS_ACTUALIZACION,
+                            etiqueta="recarga semanal" if semanal else "actualización",
+                        ),
+                        cliente_esios, "actualización de ESIOS",
+                    )
+                if cliente_esios is not None and not stop.is_set():
+                    _estimar(conn, hoy)
         except Exception:
             # El servicio sigue vivo: la siguiente ejecución lo reintentará.
             log.exception("fallo en la actualización planificada")
+
+
+def _tarea_esios(tarea: Callable[[], object], cliente: esios.Cliente,
+                 descripcion: str) -> esios.Cliente | None:
+    """Ejecuta una tarea de ESIOS; si REE rechaza el token, desactiva ESIOS."""
+    try:
+        tarea()
+    except ErrorAutenticacion as e:
+        log.error("%s: %s. ESIOS queda desactivado hasta reiniciar con un ESIOS_TOKEN válido", descripcion, e)
+        return None
+    except Exception:
+        log.exception("fallo en la %s", descripcion)
+    return cliente
+
+
+def _estimar(conn: psycopg.Connection, hoy: date) -> None:
+    try:
+        estimacion.actualizar(conn, hoy)
+    except Exception:
+        log.exception("fallo al estimar SSAA")

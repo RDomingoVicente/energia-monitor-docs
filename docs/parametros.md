@@ -68,3 +68,40 @@ COMMIT;
 Si la restricción `contrato_parametro_sin_solape` rechaza el INSERT, hay otra
 fila posterior que se solapa: limita el `hasta` del nuevo valor al inicio de
 esa fila.
+
+## SSAA: valor real de ESIOS y definición por contrato
+
+Con `ESIOS_TOKEN`, el SSAA de cada tramo sale de ESIOS y no de
+`contrato_parametro`. Orden: real > estimación (`ssaa_estimacion`) > parámetro
+`ssaa` (que sigue siendo el último recurso). `v_precio_final.ssaa_metodo`
+indica cuál se ha usado: `esios`, `prevision_ree`, `perfil_14d` o `parametro`.
+
+Qué componentes suman el SSAA real lo decide `contrato_ssaa_componente`
+(por contrato, con vigencia `[desde, hasta)` y `incluido` sí/no). Por defecto,
+los 13 componentes desde el 01/01/2026 (ver docs/contexto.md). Para ver la
+definición vigente:
+
+    docker compose exec collector python -m energia_monitor esios estado
+
+Ejemplo: excluir los desvíos (799 y 800) desde el 01/01/2027 si la
+conciliación con la factura confirma que Feníe los asume:
+
+```sql
+BEGIN;
+
+UPDATE contrato_ssaa_componente
+   SET vigencia = daterange(lower(vigencia), DATE '2027-01-01', '[)')
+ WHERE contrato = 'vivienda' AND indicador IN (799, 800)
+   AND vigencia @> DATE '2027-01-01';
+
+INSERT INTO contrato_ssaa_componente (contrato, indicador, vigencia, incluido, nota)
+VALUES ('vivienda', 799, daterange(DATE '2027-01-01', NULL, '[)'), false, 'Asumido por Feníe (factura ...)'),
+       ('vivienda', 800, daterange(DATE '2027-01-01', NULL, '[)'), false, 'Asumido por Feníe (factura ...)');
+
+COMMIT;
+```
+
+Si el cambio debe aplicarse a todo el histórico, basta con poner
+`incluido = false` en la fila vigente (no hay versión que publicar). La vista
+recalcula al momento; la estimación se recalcula en la siguiente ejecución
+del colector o con `python -m energia_monitor esios estimar`.

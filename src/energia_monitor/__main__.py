@@ -1,4 +1,4 @@
-"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar].
+"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | parametro | esios].
 
 - ejecutar (por defecto): migraciones, descarga de los días que falten desde
   CARGA_INICIAL_DESDE hasta mañana y actualización diaria planificada.
@@ -7,6 +7,11 @@
   históricos bajo demanda; sin --forzar solo descarga los días incompletos.
 - parametro registrar | listar: alta de parámetros de contrato con vigencia
   (ver docs/parametros.md).
+- esios recargar --desde AAAA-MM-DD [--hasta AAAA-MM-DD]: vuelve a descargar
+  las series de ESIOS (requiere ESIOS_TOKEN).
+- esios estimar: recalcula la estimación de SSAA de los días recientes.
+- esios estado: previsión 1871 (pendiente, verificada o corregida),
+  revisiones de REE y definición de SSAA de cada contrato.
 """
 
 from __future__ import annotations
@@ -19,9 +24,10 @@ import threading
 from datetime import date, timedelta
 from decimal import Decimal
 
-from energia_monitor import __version__, colector, db, parametros, planificador
+from energia_monitor import __version__, colector, db, esios, estimacion, parametros, planificador
 from energia_monitor.config import Config
-from energia_monitor.sources import crear_fuente
+from energia_monitor.errores import ErrorAutenticacion
+from energia_monitor.sources import crear_cliente_esios, crear_fuente
 from energia_monitor.tiempo import dias, hoy_madrid
 
 log = logging.getLogger("energia_monitor")
@@ -52,7 +58,59 @@ def _parser() -> argparse.ArgumentParser:
     listar = sub_param.add_parser("listar", help="parámetros vigentes en una fecha")
     listar.add_argument("--contrato", default="vivienda")
     listar.add_argument("--fecha", type=date.fromisoformat, help="por defecto, hoy")
+
+    esios_p = sub.add_parser("esios", help="series de ESIOS (SSAA y PVPC)")
+    sub_esios = esios_p.add_subparsers(dest="accion", required=True)
+    recargar_e = sub_esios.add_parser("recargar", help="vuelve a descargar un rango de días")
+    recargar_e.add_argument("--desde", type=date.fromisoformat, required=True)
+    recargar_e.add_argument("--hasta", type=date.fromisoformat, help="por defecto, mañana")
+    sub_esios.add_parser("estimar", help="recalcula la estimación de SSAA")
+    sub_esios.add_parser("estado", help="previsión 1871, revisiones y definición de SSAA")
     return parser
+
+
+SQL_DEFINICION_SSAA = """
+SELECT d.contrato, d.indicador, d.incluido, d.vigencia::text, i.nombre, coalesce(d.nota, '')
+FROM contrato_ssaa_componente d JOIN esios_indicador i ON i.id = d.indicador
+WHERE d.vigencia @> %s
+ORDER BY d.contrato, i.control NULLS LAST, d.indicador
+"""
+
+
+def _esios(args: argparse.Namespace, config: Config) -> int:
+    with db.conectar() as conn:
+        hoy = hoy_madrid()
+        if args.accion == "estimar":
+            estimacion.actualizar(conn, hoy)
+            return 0
+        if args.accion == "estado":
+            estado = esios.estado_prevision(conn)
+            print(f"Previsión 1871: {estado.estado} ({estado.dias_verificados} día(s) comprobados,"
+                  f" {estado.corregidos} valor(es) corregidos por REE)")
+            filas = esios.revisiones(conn)
+            print("Revisiones de REE:" if filas else "Revisiones de REE: ninguna")
+            for indicador, dia, tramos, max_cambio, _primera, modificado in filas:
+                print(f"  {indicador:>6} {dia}  {tramos:>3} tramo(s), cambio máx. {max_cambio} €/MWh,"
+                      f" último cambio {modificado:%Y-%m-%d %H:%M}")
+            print(f"Definición de SSAA vigente el {hoy}:")
+            for contrato, indicador, incluido, vigencia, nombre, nota in conn.execute(SQL_DEFINICION_SSAA, (hoy,)):
+                marca = "sí" if incluido else "no"
+                print(f"  {contrato:<9} {indicador:>6} {marca:<2} {vigencia}  {nombre}{'  [' + nota + ']' if nota else ''}")
+            return 0
+        cliente = crear_cliente_esios(config.esios_token, config.intervalo_descargas_s)
+        if cliente is None:
+            log.error("ESIOS_TOKEN no definido")
+            return 1
+        hasta = args.hasta or hoy + timedelta(days=1)
+        rango = esios.rangos_contiguos(dias(args.desde, hasta))
+        try:
+            resumen = esios.descargar(conn, cliente, {ind: rango for ind in esios.indicadores(conn)},
+                                      "recarga", _stop_por_senales())
+        except ErrorAutenticacion as e:
+            log.error("%s", e)
+            return 1
+        esios.comprobar_controles(conn, args.desde, hasta)
+        return 1 if resumen.fallidos else 0
 
 
 def _parametro(args: argparse.Namespace) -> int:
@@ -102,6 +160,9 @@ def main(argv: list[str] | None = None) -> int:
     if orden == "parametro":
         return _parametro(args)
 
+    if orden == "esios":
+        return _esios(args, config)
+
     if orden == "migrar":
         with db.conectar() as conn:
             planificador.preparar_bd(conn, config)
@@ -120,7 +181,8 @@ def main(argv: list[str] | None = None) -> int:
             resumen = colector.descargar_dias(conn, fuente, pendientes, "recarga", stop)
         return 1 if resumen.fallidos else 0
 
-    planificador.ejecutar(config, fuente, stop)
+    cliente_esios = crear_cliente_esios(config.esios_token, config.intervalo_descargas_s)
+    planificador.ejecutar(config, fuente, stop, cliente_esios=cliente_esios)
     log.info("parada completada")
     return 0
 

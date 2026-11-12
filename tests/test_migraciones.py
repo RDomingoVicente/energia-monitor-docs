@@ -22,6 +22,7 @@ PUBLICADAS = {
     "0006_grafana_ro.sql": "f785b72920a06129200ba9704c24c51b035cae07fdc20441f9b4416e12fb28a2",
     "0007_ssaa_vigencia_abierta.sql": "7e0c82bc0e991ff242620ebda1a6ce8c917c05a54692e24c4fcc34abd3442313",
     "0008_origen_parametros.sql": "ad2bfe703acc763e6676bd02a9a405b061041277346fedf220758098a6b373b7",
+    "0009_esios.sql": "6b999db8f2ac55395084f34da9928cecb7b911abb43cc263711d284b28e2c2ba",
 }
 
 

@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, time
 
 HORARIOS_POR_DEFECTO = (time(13, 30), time(17, 30), time(20, 30))
+# ESIOS: 08:30 tras la actualización diaria de REE (~08:10); 21:00 tras la
+# publicación del PVPC y la previsión 1871 del día siguiente (~20:45) y 22:00
+# como reintento.
+HORARIOS_ESIOS_POR_DEFECTO = (time(8, 30), time(21, 0), time(22, 0))
 
 
 def _horarios(texto: str) -> tuple[time, ...]:
@@ -32,6 +36,10 @@ class Config:
     # Separación mínima entre peticiones a la fuente.
     intervalo_descargas_s: float = 1.0
     grafana_db_password: str | None = None
+    # Sin token, el colector no usa ESIOS. Fuera del repr para no mostrarlo.
+    esios_token: str | None = field(default=None, repr=False)
+    esios_carga_desde: date = date(2026, 1, 1)
+    esios_horarios: tuple[time, ...] = HORARIOS_ESIOS_POR_DEFECTO
 
     @classmethod
     def desde_entorno(cls, env: Mapping[str, str] = os.environ) -> Config:
@@ -43,12 +51,17 @@ class Config:
         desde = valor("CARGA_INICIAL_DESDE")
         horarios = valor("HORARIOS")
         intervalo = valor("INTERVALO_DESCARGAS_S")
+        esios_desde = valor("ESIOS_CARGA_DESDE")
+        esios_horarios = valor("ESIOS_HORARIOS")
         config = cls(
             price_source=valor("PRICE_SOURCE") or base.price_source,
             carga_inicial_desde=date.fromisoformat(desde) if desde else base.carga_inicial_desde,
             horarios=_horarios(horarios) if horarios else base.horarios,
             intervalo_descargas_s=float(intervalo) if intervalo else base.intervalo_descargas_s,
             grafana_db_password=valor("GRAFANA_DB_PASSWORD"),
+            esios_token=valor("ESIOS_TOKEN"),
+            esios_carga_desde=date.fromisoformat(esios_desde) if esios_desde else base.esios_carga_desde,
+            esios_horarios=_horarios(esios_horarios) if esios_horarios else base.esios_horarios,
         )
         if config.intervalo_descargas_s < 0:
             raise ValueError("INTERVALO_DESCARGAS_S no puede ser negativo")

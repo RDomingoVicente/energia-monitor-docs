@@ -27,7 +27,7 @@ segunda fase, programar automáticamente el cargador en las horas más baratas.
   consumos de 182, 240 y 840 kWh respectivamente. Feníe no desglosa SSAA,
   pagos por capacidad, ROS&OM, pérdidas, FNEE ni tasa municipal, así que la
   conciliación con la factura no es un test: queda pendiente hasta tener la
-  curva horaria de consumo y el token de ESIOS.
+  curva horaria de consumo (las series de ESIOS ya están disponibles).
 
 ## Periodos horarios 2.0TD (Península)
 - P1 punta: laborables 10:00–14:00 y 18:00–22:00.
@@ -39,15 +39,90 @@ segunda fase, programar automáticamente el cargador en las horas más baratas.
   determinan peajes y cargos.
 
 ## Fuentes de datos
-- API de ESIOS (REE), https://api.esios.ree.es, requiere token personal
-  (solicitado a consultasios@ree.es; pendiente de recibir).
-  - Indicador 600: precio del mercado diario (spot OMIE), €/MWh.
-  - Indicador 1001: PVPC 2.0TD (como referencia de comparación).
-  - Por confirmar: indicadores de servicios de ajuste, pagos por capacidad y
-    coeficientes de pérdidas 2.0TD.
+- API de ESIOS (REE), https://api.esios.ree.es, con token personal (variable
+  ESIOS_TOKEN; nunca en ficheros ni en CI). Detalle verificado más abajo.
 - Alternativas sin token: API REData (apidatos.ree.es) y ficheros diarios de
   OMIE. Verificar formato y disponibilidad antes de usarlas.
 - Los precios del día siguiente se publican hacia el mediodía del día anterior.
+
+## ESIOS: indicadores verificados (12/11/2026)
+
+Comprobado contra la API real; ningún identificador sin verificar.
+
+- Petición: `GET /indicators/{id}?start_date=...Z&end_date=...Z&geo_ids[]=8741`,
+  fechas en UTC con ambos extremos incluidos. Cabecera `x-api-key: <token>`
+  (también vale `Authorization: Token token="..."`). Sin token, el catálogo
+  `/indicators` responde 403. `/indicators/{id}` respondió también sin token,
+  pero no se cuenta con ello.
+- Respuesta: `indicator.values[]` con `value` (€/MWh, 2 decimales),
+  `datetime_utc`, `geo_id`; `indicator.values_updated_at` es la última
+  actualización de REE. 8741 = Península.
+
+### Servicios de ajuste (SSAA)
+
+No hay un indicador llamado "SSAA". El precio final de la demanda en
+contratación libre (804, cuartohorario) se descompone exactamente, con un error
+de redondeo de hasta 0,05 €/MWh en todo 2026:
+
+    804 = 792 mercado diario + 795 intradiario + 801 pagos por capacidad
+        + 10379 restricciones técnicas + 10382 procesos OS + 10525 participación servicios
+    10379 = 793 restricciones PBF + 794 restricciones tiempo real + 2401 control de tensión (coste)
+    10382 = 798 banda secundaria + 799 desvíos + 800 saldo desvíos + 802 saldo P.O.14.6
+          + 1366 incumplimiento energía de balance + 2389 RAD incumplimiento energía activada
+          + 2392 intercambios apoyo con precio + 2395 coste a BRP servicio de respuesta activa
+          + 2398 incumplimiento aFRR
+
+(todos "contratación libre", cuartohorarios, €/MWh en barras de central).
+
+- **Definición: SSAA = 10379 + 10382 + 10525** (sin intradiario). Se guardan
+  los 13 subcomponentes y la suma la decide la tabla
+  `contrato_ssaa_componente` (por contrato y con vigencia); 10379 y 10382 se
+  descargan solo para comprobar que la suma cuadra (si no, REE ha añadido un
+  componente).
+- **Duda abierta sobre los desvíos.** El contrato dice "Sobrecoste de
+  desvíos: 100% asumido por Fenie Energía". No está claro si se refiere a los
+  desvíos propios de Feníe o a los componentes de desvíos del sistema
+  repercutidos a la demanda (799 desvíos y 800 saldo de desvíos, incluidos en
+  10382). Por defecto se incluyen todos; se resolverá conciliando una factura
+  con la curva horaria de i-DE. Para excluirlos, ver docs/parametros.md.
+- **Publicación.** REE actualiza estas series cada día hacia las 08:08 (hora
+  de Madrid). El día D aparece ya en D con valores parciales (restricciones
+  PBF y banda); tiempo real, desvíos e intradiario se completan en D+2. Por
+  eso un día cuenta como real solo si `values_updated_at` es de D+2 o
+  posterior (`esios_indicador.dias_hasta_completo`). Los valores pueden
+  cambiar después (p. ej., en el 10/11, desvíos de +42,9 y saldo de −30,3
+  €/MWh en la primera publicación); el colector guarda el primer valor visto
+  y registra cada revisión (`python -m energia_monitor esios estado`).
+- Medias mensuales de 2026 (€/MWh): ene 14,37 · feb 24,13 · mar 27,38 ·
+  abr 20,86 · may 20,20 · jun 16,41 · jul 17,32 · ago 17,22 · sep 24,53 ·
+  oct 23,45 · nov (1–10) 20,59. El estimado anterior (31,5) era alto.
+
+### Previsión de SSAA y PVPC
+
+- **1871** "Desglose peaje por defecto 2.0TD Servicios de ajuste": horario,
+  se publica en D−1 hacia las 20:45. Es la previsión de SSAA del PVPC (sin
+  escalar, un 7 €/MWh por encima del valor de contratación libre de media).
+- **1001** "Término de facturación de energía activa del PVPC 2.0TD":
+  horario, 5 zonas, publicado en D−1 hacia las 20:45. Incluye peajes y cargos
+  (coinciden con los del contrato: 97,55 / 29,27 / 3,29 €/MWh) y no incluye
+  IEE ni IVA. Coincide con 10391 (suma de componentes).
+- **ROS**: no hay serie de mercado. Solo 1877 ("Financiación OS" del
+  desglose del PVPC 2.0TD, horario, 0,23–0,25 €/MWh redondeado a 2 decimales),
+  que no es lo que repercute Feníe. Se mantiene como parámetro.
+
+### Estimación de SSAA sin valor publicado
+
+Orden: real de ESIOS > `prevision_ree` (1871 × real/1871 de los últimos 28
+días) > `perfil_14d` (media por hora local de los 14 últimos días con real,
+separando laborables de fines de semana y festivos) > parámetro estimado.
+Contraste con 269 días de 2026 usando solo lo disponible a las 20:30 de D−1
+(MAE horario / MAE de la media diaria, €/MWh): 1871 escalado 3,38 / 1,96;
+perfil 14 días 5,35 / 3,40; perfil 28 días 5,60 / 3,84.
+
+`prevision_ree` solo se usa cuando se ha comprobado que REE no corrige lo que
+publica la víspera: el colector guarda el 1871 de cada noche y lo compara con
+las descargas posteriores. Hasta tener 7 días comprobados (o si hay alguna
+corrección) se usa el perfil de 14 días.
 
 ## Infraestructura disponible
 - NAS Synology (DSM) con Docker / Container Manager; despliegues en

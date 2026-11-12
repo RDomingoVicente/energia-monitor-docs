@@ -785,7 +785,429 @@
           "valueSize": 18
         }
       }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "PVPC 2.0TD frente a mi precio (€/kWh)",
+      "description": "Por hora, con IEE e IVA del contrato aplicados a ambos. PVPC: indicador 1001 de ESIOS (término de energía con peajes y cargos). Mi precio: media de los cuatro tramos de la hora.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 16,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT inicio AS time,\n  precio_final_eur_kwh AS \"Mi precio\",\n  pvpc_final_eur_kwh AS \"PVPC\"\nFROM v_comparacion_pvpc\nWHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente'\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: €/kWh",
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "spanNulls": false,
+            "barAlignment": -1,
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Mi precio"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PVPC"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "PVPC: mes en curso (media hasta ahora)",
+      "description": "Media simple de las horas del mes hasta ahora, con impuestos; no está ponderada por consumo. Diferencia positiva: mi contrato es más caro que el PVPC.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 38,
+        "w": 8,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  avg(precio_final_eur_kwh) AS \"Mi precio\",\n  avg(pvpc_final_eur_kwh) AS \"PVPC\",\n  avg(diferencia_eur_kwh) AS \"Diferencia\"\nFROM v_comparacion_pvpc\nWHERE contrato = '$contrato' AND fuente = '$fuente'\n  AND inicio >= date_trunc('month', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid'\n  AND inicio < now()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Mi precio"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PVPC"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Diferencia"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Diferencia diaria con el PVPC (€/kWh)",
+      "description": "Media diaria (hora de Madrid) de mi precio menos el PVPC, con impuestos, últimos 30 días. Positiva: mi contrato es más caro.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 47,
+        "w": 16,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  date_trunc('day', inicio AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS time,\n  avg(diferencia_eur_kwh) AS \"Diferencia\"\nFROM v_comparacion_pvpc\nWHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente'\nGROUP BY 1\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: €/kWh",
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 70,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "spanNulls": false,
+            "barAlignment": -1,
+            "axisBorderShow": false
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "timeFrom": "30d"
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Estado de los componentes (tramo actual)",
+      "description": "real: OMIE y SSAA publicado por REE (ESIOS). estimado: aproximación (SSAA sin publicar: prevision_ree o perfil_14d; ROS). regulado: norma publicada. contrato: pactado (RFE).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 47,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  coalesce(ssaa_origen || ' (' || ssaa_metodo || ')', 'sin valor') AS \"SSAA\",\n  coalesce((SELECT string_agg(k, ', ' ORDER BY k) FROM jsonb_each_text(estado_componentes) e(k, v) WHERE v = 'real'), 'ninguno') AS \"Reales\",\n  coalesce((SELECT string_agg(k, ', ' ORDER BY k) FROM jsonb_each_text(estado_componentes) e(k, v) WHERE v = 'estimado'), 'ninguno') AS \"Estimados\",\n  coalesce((SELECT string_agg(k, ', ' ORDER BY k) FROM jsonb_each_text(estado_componentes) e(k, v) WHERE v IN ('regulado', 'contrato')), 'ninguno') AS \"Regulados y contrato\"\nFROM v_precio_final\nWHERE contrato = '$contrato' AND fuente = '$fuente' AND inicio <= now() AND fin > now()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "Origen de SSAA por día",
+      "description": "Últimos 10 días y mañana. esios: valor publicado por REE (completo en D+2); prevision_ree: previsión 1871 escalada (solo si está verificada); perfil_14d: media por hora de los 14 últimos días del mismo tipo; parametro: valor estimado de contrato_parametro.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  (inicio AT TIME ZONE 'Europe/Madrid')::date AS \"Día\",\n  string_agg(DISTINCT ssaa_metodo, ', ') AS \"Método\",\n  string_agg(DISTINCT ssaa_origen, ', ') AS \"Origen\",\n  avg(ssaa) AS \"SSAA medio (€/MWh)\",\n  avg(precio_final_eur_kwh) AS \"Precio final medio (€/kWh)\"\nFROM v_precio_final\nWHERE contrato = '$contrato' AND fuente = '$fuente'\n  AND inicio >= date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' - interval '10 days'\n  AND inicio < date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' + interval '2 days'\nGROUP BY 1\nORDER BY 1 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "SSAA medio (€/MWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Precio final medio (€/kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
     }
   ],
-  "version": 3
+  "version": 4
 }
