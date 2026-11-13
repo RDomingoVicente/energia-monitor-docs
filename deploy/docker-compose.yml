@@ -49,6 +49,25 @@ services:
       ESIOS_HORARIOS: ${ESIOS_HORARIOS:-08:30,21:00,22:00}
       TZ: Europe/Madrid
 
+  # Muestreo del cargador (fase 2, etapa 1): misma imagen, proceso continuo
+  # separado de la descarga de precios. Solo lecturas (GET). Sin VIARIS_URL
+  # queda en espera sin hacer nada.
+  muestreo:
+    image: ${HARBOR_REGISTRY}/${HARBOR_PROJECT:-energia}/collector:${COLLECTOR_TAG:-latest}
+    command: ["python", "-m", "energia_monitor", "cargador", "muestrear"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-energia}
+      PGUSER: ${POSTGRES_USER:-energia}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      VIARIS_URL: ${VIARIS_URL:-}
+      TZ: Europe/Madrid
+
 networks:
   default:
     # Nombre fijo: el stack de Grafana se une a ella como red externa.

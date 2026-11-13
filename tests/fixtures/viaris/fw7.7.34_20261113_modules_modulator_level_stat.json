@@ -1,0 +1,12 @@
+{
+	"uid":	22,
+	"stat":	{
+		"totalPower":	312,
+		"evsePower":	0,
+		"homePower":	312,
+		"selectorPower":	4600,
+		"mbusDetected":	false,
+		"splDetected":	true,
+		"ctxDetected":	true
+	}
+}

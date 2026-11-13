@@ -1,4 +1,4 @@
-"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | parametro | esios].
+"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | parametro | esios | cargador].
 
 - ejecutar (por defecto): migraciones, descarga de los días que falten desde
   CARGA_INICIAL_DESDE hasta mañana y actualización diaria planificada.
@@ -12,6 +12,12 @@
 - esios estimar: recalcula la estimación de SSAA de los días recientes.
 - esios estado: previsión 1871 (pendiente, verificada o corregida),
   revisiones de REE y definición de SSAA de cada contrato.
+- cargador muestrear: servicio de muestreo del cargador (requiere VIARIS_URL;
+  sin ella queda en espera).
+- cargador estado: cargador alcanzable o no, última muestra, sesiones
+  guardadas y huecos de hoy.
+- parametro ... --ambito cargador: parámetros del cargador (factor del
+  contador, potencia de la estimación).
 """
 
 from __future__ import annotations
@@ -21,14 +27,15 @@ import logging
 import signal
 import sys
 import threading
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from energia_monitor import __version__, colector, db, esios, estimacion, parametros, planificador
+from energia_monitor import __version__, colector, db, esios, estimacion, muestreo, parametros, planificador
 from energia_monitor.config import Config
 from energia_monitor.errores import ErrorAutenticacion
 from energia_monitor.sources import crear_cliente_esios, crear_fuente
 from energia_monitor.tiempo import dias, hoy_madrid
+from energia_monitor.viaris import ClienteViaris
 
 log = logging.getLogger("energia_monitor")
 
@@ -46,6 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     parametro = sub.add_parser("parametro", help="parámetros de contrato con vigencia")
     sub_param = parametro.add_subparsers(dest="accion", required=True)
     registrar = sub_param.add_parser("registrar", help="nuevo valor desde una fecha (cierra el anterior)")
+    registrar.add_argument("--ambito", choices=("contrato", "cargador"), default="contrato")
     registrar.add_argument("--contrato", default="vivienda")
     registrar.add_argument("--clave", required=True)
     registrar.add_argument("--periodo", default="*", help="'*' o P1..P6 según la clave")
@@ -56,6 +64,7 @@ def _parser() -> argparse.ArgumentParser:
     registrar.add_argument("--fuente", required=True)
     registrar.add_argument("--nota")
     listar = sub_param.add_parser("listar", help="parámetros vigentes en una fecha")
+    listar.add_argument("--ambito", choices=("contrato", "cargador"), default="contrato")
     listar.add_argument("--contrato", default="vivienda")
     listar.add_argument("--fecha", type=date.fromisoformat, help="por defecto, hoy")
 
@@ -66,7 +75,28 @@ def _parser() -> argparse.ArgumentParser:
     recargar_e.add_argument("--hasta", type=date.fromisoformat, help="por defecto, mañana")
     sub_esios.add_parser("estimar", help="recalcula la estimación de SSAA")
     sub_esios.add_parser("estado", help="previsión 1871, revisiones y definición de SSAA")
+
+    cargador = sub.add_parser("cargador", help="cargador Orbis Viaris (solo lecturas)")
+    sub_cargador = cargador.add_subparsers(dest="accion", required=True)
+    sub_cargador.add_parser("muestrear", help="servicio de muestreo continuo")
+    sub_cargador.add_parser("estado", help="alcanzable, última muestra, sesiones y huecos de hoy")
     return parser
+
+
+def _cliente_viaris(config: Config) -> ClienteViaris | None:
+    return ClienteViaris(config.viaris_url) if config.viaris_url else None
+
+
+def _cargador(args: argparse.Namespace, config: Config) -> int:
+    cliente = _cliente_viaris(config)
+    if args.accion == "muestrear":
+        muestreo.ejecutar(cliente, _stop_por_senales())
+        log.info("parada completada")
+        return 0
+    with db.conectar() as conn:
+        for linea in muestreo.estado(conn, cliente, datetime.now(UTC)):
+            print(linea)
+    return 0
 
 
 SQL_DEFINICION_SSAA = """
@@ -115,20 +145,30 @@ def _esios(args: argparse.Namespace, config: Config) -> int:
 
 def _parametro(args: argparse.Namespace) -> int:
     with db.conectar() as conn:
+        cargador = args.ambito == "cargador"
         if args.accion == "listar":
             fecha = args.fecha or hoy_madrid()
-            print(f"Parámetros de {args.contrato} vigentes el {fecha}:")
-            for clave, periodo, valor, unidad, origen, vigencia, fuente in parametros.listar_parametros(
-                conn, args.contrato, fecha
-            ):
+            if cargador:
+                print(f"Parámetros del cargador vigentes el {fecha}:")
+                filas = parametros.listar_parametros_cargador(conn, fecha)
+            else:
+                print(f"Parámetros de {args.contrato} vigentes el {fecha}:")
+                filas = parametros.listar_parametros(conn, args.contrato, fecha)
+            for clave, periodo, valor, unidad, origen, vigencia, fuente in filas:
                 texto = "sin valor" if valor is None else f"{valor} {unidad}"
                 print(f"  {clave:<19} {periodo:<3} {origen:<9} {texto}  {vigencia}  [{fuente}]")
             return 0
         try:
-            registro = parametros.registrar_parametro(
-                conn, contrato=args.contrato, clave=args.clave, periodo=args.periodo, desde=args.desde,
-                valor=args.valor, origen=args.origen, fuente=args.fuente, nota=args.nota,
-            )
+            if cargador:
+                registro = parametros.registrar_parametro_cargador(
+                    conn, clave=args.clave, desde=args.desde, valor=args.valor,
+                    origen=args.origen, fuente=args.fuente, nota=args.nota,
+                )
+            else:
+                registro = parametros.registrar_parametro(
+                    conn, contrato=args.contrato, clave=args.clave, periodo=args.periodo, desde=args.desde,
+                    valor=args.valor, origen=args.origen, fuente=args.fuente, nota=args.nota,
+                )
         except parametros.ErrorParametro as e:
             log.error("%s", e)
             return 1
@@ -162,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if orden == "esios":
         return _esios(args, config)
+
+    if orden == "cargador":
+        return _cargador(args, config)
 
     if orden == "migrar":
         with db.conectar() as conn:

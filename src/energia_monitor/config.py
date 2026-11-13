@@ -40,6 +40,8 @@ class Config:
     esios_token: str | None = field(default=None, repr=False)
     esios_carga_desde: date = date(2026, 1, 1)
     esios_horarios: tuple[time, ...] = HORARIOS_ESIOS_POR_DEFECTO
+    # Dirección del cargador (http://host). Sin ella, el muestreo queda desactivado.
+    viaris_url: str | None = None
 
     @classmethod
     def desde_entorno(cls, env: Mapping[str, str] = os.environ) -> Config:
@@ -62,6 +64,7 @@ class Config:
             esios_token=valor("ESIOS_TOKEN"),
             esios_carga_desde=date.fromisoformat(esios_desde) if esios_desde else base.esios_carga_desde,
             esios_horarios=_horarios(esios_horarios) if esios_horarios else base.esios_horarios,
+            viaris_url=valor("VIARIS_URL"),
         )
         if config.intervalo_descargas_s < 0:
             raise ValueError("INTERVALO_DESCARGAS_S no puede ser negativo")

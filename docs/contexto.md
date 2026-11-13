@@ -24,10 +24,15 @@ segunda fase, programar automáticamente el cargador en las horas más baratas.
   de hora del 01/10 al 31/10, ficheros marginalpdbc de OMIE, precio España).
 - Factura de octubre 2026 (periodo 01/10/2026–31/10/2026): precio coste
   energía facturado 0,274447 (P1), 0,279393 (P2), 0,279020 (P3) €/kWh, con
-  consumos de 182, 240 y 840 kWh respectivamente. Feníe no desglosa SSAA,
-  pagos por capacidad, ROS&OM, pérdidas, FNEE ni tasa municipal, así que la
-  conciliación con la factura no es un test: queda pendiente hasta tener la
-  curva horaria de consumo (las series de ESIOS ya están disponibles).
+  consumos de 182, 240 y 840 kWh respectivamente (1262,447 kWh en total).
+- La factura desglosa por periodo cinco columnas (mercado; peaje; cargos;
+  PC + OS&OM + FNEE; tasa municipal) y trae una tabla de coste diario. Con la
+  de octubre de 2026: la suma de las cinco columnas (353,85 €) más el RFE
+  (1262,447 kWh × 20 €/MWh = 25,25 €) da el total del término de energía,
+  379,10 € sin impuestos. La tasa municipal es el 1,5 % de mercado + PC,
+  OS&OM y FNEE + RFE (5,19 €). La conciliación ya es posible: queda
+  pendiente de la curva horaria de i-DE (las series de ESIOS ya están
+  disponibles).
 
 ## Periodos horarios 2.0TD (Península)
 - P1 punta: laborables 10:00–14:00 y 18:00–22:00.
@@ -127,7 +132,8 @@ corrección) se usa el perfil de 14 días.
 ## Infraestructura disponible
 - NAS Synology (DSM) con Docker / Container Manager; despliegues en
   /volume1/docker/<servicio>.
-- Acceso por Tailscale (el NAS no está en la LAN de la vivienda).
+- Acceso remoto por Tailscale. El NAS está en la LAN de la vivienda y llega
+  al cargador por HTTP (192.168.1.34); no hace falta un nodo intermedio.
 - En el NAS: Gitea (con runner de Gitea Actions) y registry Harbor, con TLS
   mediante el certificado de Tailscale.
 - Grafana existente (stack de monitorización de Odoo: cAdvisor, Prometheus,
@@ -154,20 +160,16 @@ corrección) se usa el perfil de 14 días.
    histórico y cálculos de fórmula encajan mejor en SQL).
 
 ## Fase 2: automatización de la carga del vehículo
-- Cargador: Orbis Viaris, identificador EVVC3C9791D30. Admite MQTT (broker
-  local), HTTP y OCPP 1.6; API documentada en support.orbis.com.es.
-- Límite: 16 A (3,7 kW) por la potencia contratada de 4,6 kW.
-- Franjas configuradas hoy en la app e-VIARIS: 01:00–06:00 (base, activa),
-  00:00–01:00, 06:00–08:00, 10:00–14:00 y 14:00–18:00 (inactivas).
-- Lógica prevista: elegir los N tramos más baratos en precio final (mercado +
-  peaje del periodo) según los kWh necesarios y enviarlos al cargador.
-- Pendiente: el cargador está en la LAN de la vivienda y el NAS fuera de ella.
-  Hace falta un nodo en esa LAN (subnet router de Tailscale o broker MQTT
-  local).
-- Pendiente: confirmar en la API de Orbis el topic o método para programar
-  franjas o iniciar y detener la carga.
-- Alternativa a evaluar antes de programar: evcc (carga inteligente de código
-  abierto, con tarifa ESIOS y soporte OCPP).
+La fase 2 sigue [fase2.md](fase2.md) (especificación por etapas y decisiones
+tomadas). La API del cargador, sus franjas actuales y lo verificado están en
+[viaris-api.md](viaris-api.md). Datos que cambian respecto a lo anotado antes:
+
+- Cargador Orbis Viaris UNI (EVVC3C9791D30), en la misma LAN que el NAS; se
+  controla por su API HTTP local.
+- Carga real de unos 4,0 a 4,5 kW (20 A), no 16 A y 3,7 kW. El límite de red
+  de la vivienda en el modulador es de 4500 W.
+- Las franjas configuradas en el cargador ya no son las de la tabla antigua:
+  ver viaris-api.md.
 
 ## Posibles ampliaciones
 - Segundo suministro (local, 3.0TD, 17,5 kW, seis periodos por temporada), con

@@ -96,3 +96,67 @@ def listar_parametros(conn: psycopg.Connection, contrato: str, fecha: date) -> l
         " ORDER BY cp.clave, cp.periodo",
         (contrato, fecha),
     ).fetchall()
+
+
+# --- Parámetros del cargador (cargador_parametro, migración 0010) -------------------
+
+
+def registrar_parametro_cargador(
+    conn: psycopg.Connection,
+    *,
+    clave: str,
+    desde: date,
+    valor: Decimal,
+    origen: str,
+    fuente: str,
+    nota: str | None = None,
+) -> Registro:
+    """Como registrar_parametro, para los parámetros del cargador (sin contrato ni periodo)."""
+    if not fuente.strip():
+        raise ErrorParametro("la fuente es obligatoria")
+    if origen not in ORIGENES:
+        raise ErrorParametro(f"origen no válido: {origen!r} (usa {', '.join(ORIGENES)})")
+    with conn.transaction():
+        conn.execute("SELECT 1 FROM cargador_parametro WHERE clave = %s FOR UPDATE", (clave,))
+        actual = conn.execute(
+            "SELECT id, lower(vigencia), vigencia::text FROM cargador_parametro"
+            " WHERE clave = %s AND vigencia @> %s::date",
+            (clave, desde),
+        ).fetchone()
+        cerrada = None
+        if actual is not None:
+            id_actual, inicio_actual, texto_actual = actual
+            if inicio_actual == desde:
+                raise ErrorParametro(
+                    f"ya hay un valor de {clave} que empieza el {desde} ({texto_actual});"
+                    " regístralo con otra fecha o corrígelo en SQL"
+                )
+            conn.execute(
+                "UPDATE cargador_parametro SET vigencia = daterange(lower(vigencia), %s::date, '[)')"
+                " WHERE id = %s",
+                (desde, id_actual),
+            )
+            cerrada = texto_actual
+        siguiente = conn.execute(
+            "SELECT min(lower(vigencia)) FROM cargador_parametro WHERE clave = %s AND lower(vigencia) > %s::date",
+            (clave, desde),
+        ).fetchone()
+        hasta = siguiente[0] if siguiente else None
+        fila = conn.execute(
+            "INSERT INTO cargador_parametro (clave, vigencia, valor, origen, fuente, nota)"
+            " VALUES (%s, daterange(%s::date, %s::date, '[)'), %s, %s, %s, %s)"
+            " RETURNING vigencia::text",
+            (clave, desde, hasta, valor, origen, fuente, nota),
+        ).fetchone()
+        assert fila is not None
+        return Registro(cerrada=cerrada, nueva=fila[0])
+
+
+def listar_parametros_cargador(conn: psycopg.Connection, fecha: date) -> list[tuple]:
+    """Parámetros del cargador vigentes en la fecha: (clave, '*', valor, unidad, origen, vigencia, fuente)."""
+    return conn.execute(
+        "SELECT cp.clave, '*', cp.valor, k.unidad, cp.origen, cp.vigencia::text, cp.fuente"
+        " FROM cargador_parametro cp JOIN cargador_parametro_clave k USING (clave)"
+        " WHERE cp.vigencia @> %s::date ORDER BY cp.clave",
+        (fecha,),
+    ).fetchall()

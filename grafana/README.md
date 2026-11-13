@@ -70,5 +70,29 @@ vacíos y el resto del dashboard no cambia. Vistas: `v_comparacion_pvpc`
 (PVPC frente al contrato, por hora) y las columnas `ssaa_origen`,
 `ssaa_metodo` y `estado_componentes` de `v_precio_final`.
 
+### Fila "Coche" (fase 2, etapa 1)
+
+Datos del servicio `muestreo` (requiere `VIARIS_URL`). Euros con IEE e IVA;
+kWh del coche corregidos con el factor del contador del cargador
+(`cargador_parametro.factor_contador`, estimado).
+
+| Panel | Qué muestra |
+|-------|-------------|
+| Gasto del coche | Euros y kWh de hoy, semana y mes en curso; kWh estimados del mes aparte |
+| Gasto en el rango | Euros, kWh y €/kWh medio del rango del selector; kWh estimados aparte |
+| Precio medio pagado | €/kWh del coche (ponderado) frente a la media simple del precio final en el mismo rango, hasta ahora |
+| Frente al PVPC | Coste real y coste con el PVPC de la misma energía (solo tramos con PVPC) |
+| Estado del cargador | Estado del conector, potencia del coche y de la casa (sin verificar) y antigüedad de la última muestra (rojo desde 180 s) |
+| Gasto diario del coche (30 días) | Euros medidos y estimados apilados y kWh en el eje derecho |
+| Reparto por periodo | kWh, euros y €/kWh por periodo 2.0TD en el rango |
+| Sesiones recientes | Últimas 15 sesiones: inicio, fin, kWh, euros, €/kWh, origen (medida o estimada) y diferencia con la energía del cargador |
+
+Origen de la energía: `muestreo` (muestras de potencia) o `estimado_sesion`
+(sesiones anteriores al muestreo, repartidas a potencia constante). La
+potencia de la casa queda marcada como no verificada hasta comprobar que
+`totalPower = evsePower + homePower` durante una carga. Vistas:
+`v_energia_tramo`, `v_coste_tramo` (por tramo y consumidor) y
+`v_sesion_coste`.
+
 El JSON está en el repositorio: los cambios hechos en la interfaz de Grafana
 se exportan (Share → Export) y se guardan aquí.

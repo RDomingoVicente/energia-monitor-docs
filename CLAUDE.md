@@ -1,70 +1,89 @@
 # energia-monitor
 
-Contexto de negocio: ver docs/contexto.md (leer antes de cualquier cambio).
+Antes de cualquier cambio, leer:
 
-## Alcance actual: fase 1
-Colector de precios + PostgreSQL + dashboard de Grafana. La fase 2
-(cargador Orbis Viaris) queda fuera hasta nuevo aviso.
+- docs/contexto.md: suministro, contrato, fórmula de precio y fuentes de datos.
+- docs/fase2.md: especificación de la fase 2 y decisiones tomadas.
+- docs/viaris-api.md: API local del cargador (qué está verificado y qué no).
 
 ## Estado
-Hechas: migraciones 0001–0009 (precios, contrato con vigencias, parámetros
-estimados, festivos y periodos, vista v_precio_final, rol grafana_ro, ESIOS),
-fuente OMIE, ESIOS (SSAA real por componentes, previsión 1871 y PVPC 1001),
-dashboard de Grafana y tests (unitarios + integración con PostgreSQL).
-Colector: `python -m energia_monitor [ejecutar|migrar|recargar|parametro|esios]`;
-al arrancar migra y descarga los días que falten desde CARGA_INICIAL_DESDE (y
-de ESIOS desde ESIOS_CARGA_DESDE si hay ESIOS_TOKEN); después actualiza OMIE en
-HORARIOS (13:30, 17:30, 20:30) y ESIOS en ESIOS_HORARIOS (08:30, 21:00, 22:00;
-recarga de 90 días los domingos) y recalcula la estimación de SSAA.
-SSAA: real de ESIOS (definición en contrato_ssaa_componente) > estimación
-(prevision_ree solo con la previsión 1871 verificada; si no, perfil_14d) >
-parámetro estimado. Indicadores y dudas abiertas en docs/contexto.md.
-Pendiente: ROS definitivo (parámetro, sin prioridad) y conciliar SSAA (duda de
-los desvíos) con una factura y la curva horaria de i-DE.
-Tests de integración en local: definir PG* (PGHOST incluido) y `pytest -m integration`.
+
+- Fase 1 en producción desde el 12/11/2026: colector de OMIE y ESIOS,
+  PostgreSQL, precio final según contrato, comparación con el PVPC y dashboard
+  de Grafana. Migraciones 0001 a 0009 publicadas.
+- Etapa 1 implementada (v0.4.0, pendiente de tag): migraciones 0010
+  (tablas del cargador) y 0011 (energía y coste), servicio `muestreo` en el
+  compose y fila "Coche" del dashboard.
+- Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 1, medición.**
+  Las etapas 2 y 3 no se empiezan hasta nuevo aviso.
 
 ## Estructura
+
 - src/energia_monitor/   código del colector
-- tests/                 pytest
+- tests/                 pytest, con respuestas reales guardadas como fixtures
 - db/migrations/         migraciones SQL versionadas (NNNN_descripcion.sql)
-- grafana/               dashboard(s) en JSON y notas del datasource
+- grafana/               dashboard en JSON y notas del datasource
 - deploy/                docker-compose.yml y .env.example para el NAS
+- docs/                  contexto, especificaciones y tareas (docs/tareas/)
 - .gitea/workflows/      CI (tests en cada push; imagen a Harbor en cada tag v*)
 
 ## Comandos
+
 - Tests (igual que en CI):   docker build --target test .
 - Tests en local:            pip install -e . pytest && pytest
 - Imagen de ejecución:       docker build -t energia-monitor:dev .
 
 ## Convenciones
-- Python 3.12, dependencias mínimas, tipado y tests con pytest.
-- Fuentes de precios detrás de una interfaz común, seleccionable con la
-  variable PRICE_SOURCE (omie). ESIOS (SSAA y PVPC) es aparte y opcional:
-  sin ESIOS_TOKEN el colector funciona igual que antes.
-- Indicadores de ESIOS en la tabla esios_indicador, no en el código.
-- Conexión a PostgreSQL con las variables estándar de libpq
-  (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD).
-- Toda marca temporal en UTC (timestamptz); la zona Europe/Madrid solo se
-  aplica al calcular periodos tarifarios y al presentar.
-- Inserciones idempotentes (upsert por tramo y fuente).
-- Parámetros del contrato en tabla con vigencia, nunca como constantes.
-- Migraciones publicadas inmutables (desde el commit 5d79781): cualquier
-  cambio va en una migración nueva. tests/test_migraciones.py guarda el hash
-  de cada una; al publicar una nueva, añadir su hash.
-- Valores de parámetros en el NAS: `python -m energia_monitor parametro
-  registrar|listar` o SQL, según docs/parametros.md (sin versión nueva).
-- Usuario de solo lectura para Grafana, creado por migración.
-- Secretos solo por variables de entorno; .env fuera de git.
-- No inventar endpoints ni identificadores de indicadores: verificarlos
-  contra la documentación de la API antes de usarlos.
+
+- Python 3.12, dependencias mínimas (`psycopg[binary]`, descargas con
+  `urllib`), tipado y tests con pytest.
+- Marcas temporales en UTC (`timestamptz`); Europe/Madrid solo para periodos
+  tarifarios y presentación.
+- Inserciones idempotentes (upsert).
+- Parámetros en tabla con vigencia (`daterange '[)'`), nunca constantes en el
+  código. Cada valor lleva su origen: contrato, regulado o estimado.
+- Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
+  tests.
+- **Las migraciones publicadas son inmutables**: cualquier cambio va en una
+  migración nueva (la siguiente es la 0012).
+- Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
+  quedar legibles para él.
+- Secretos solo por variables de entorno; `.env` fuera de git; el token de
+  ESIOS nunca en el repositorio, los logs ni el CI.
+- No usar endpoints, indicadores ni campos sin verificarlos contra el sistema
+  real. Lo no verificado se marca como tal en la documentación.
+- El CI no llama a servicios externos ni al cargador.
 - El contenedor se ejecuta con usuario sin privilegios.
 
-## Entregables de la fase 1
-- Colector con planificación diaria y recarga de históricos.
-- Migraciones: precios, parámetros de contrato, festivos, vista de precio final.
-- Dashboard de Grafana en grafana/ con su datasource documentado.
-- Test de validación con los datos de octubre de 2026 de docs/contexto.md.
+## Reglas para el cargador (obligatorias)
+
+El cargador es un equipo físico en producción, sin autenticación.
+
+- Todo acceso pasa por el cliente del cargador, que comprueba método y ruta
+  contra una lista cerrada. Nada de peticiones HTTP sueltas.
+- En la etapa 1 solo se permiten GET. Las escrituras llegan en la etapa 3 y
+  se limitan a `/modules/scheduler/elements/<conector>`.
+- Rutas prohibidas siempre: `/reset/sys`, `/modules/network`, y cualquier
+  escritura en ocpp, mqtt_user, solar, spl, modbus, `/elements` y `/device`.
+- No registrar en logs las respuestas de `/modules/network` ni de
+  `/modules/mqtt_user`.
+- Los tests nunca contactan con el cargador real.
+- Las pruebas contra el cargador real las hace el usuario; proponer el
+  comando y esperar el resultado. Usar la skill `viaris`.
+
+## Forma de trabajo
+
+- Cada tarea parte de un documento de docs/tareas/. Primero se presenta un
+  plan (ficheros, migraciones, tests) y se espera la aprobación; después se
+  implementa.
+- Si la especificación y la realidad no coinciden, parar y preguntar; no
+  improvisar una alternativa.
+- Al terminar una tarea: actualizar la documentación afectada y resumir qué
+  queda verificado y qué pendiente.
 
 ## Despliegue
+
 - Un tag vX.Y.Z publica la imagen en Harbor (ver .gitea/workflows/ci.yml).
 - En el NAS: deploy/docker-compose.yml + .env en /volume1/docker/energia-monitor.
+- Cambiar el `.env` exige `docker compose up -d`; un `restart` no relee las
+  variables.

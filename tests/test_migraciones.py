@@ -23,6 +23,8 @@ PUBLICADAS = {
     "0007_ssaa_vigencia_abierta.sql": "7e0c82bc0e991ff242620ebda1a6ce8c917c05a54692e24c4fcc34abd3442313",
     "0008_origen_parametros.sql": "ad2bfe703acc763e6676bd02a9a405b061041277346fedf220758098a6b373b7",
     "0009_esios.sql": "6b999db8f2ac55395084f34da9928cecb7b911abb43cc263711d284b28e2c2ba",
+    "0010_cargador.sql": "486f9b9db6d26fe8031336b4e1aeff305df1b5bc169990e55c82d3b730bb5440",
+    "0011_energia_coste.sql": "13f63836764a3ff425656c2c1da2cb1b127dfb2a04e4ef9d95cea5221e5ea20d",
 }
 
 
