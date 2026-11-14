@@ -1,6 +1,6 @@
 """Consultas del dashboard de Grafana ejecutadas contra PostgreSQL.
 
-Se usan las consultas tal como están en grafana/energia-monitor.json: se
+Se usan las consultas tal como están en grafana/energia-precios.json: se
 sustituyen las variables ($contrato, $fuente), la macro $__timeFilter y now()
 por valores fijos, y se comprueba que la tabla de horas baratas coincide con
 la curva de precio final.
@@ -23,7 +23,7 @@ from energia_monitor.sources.base import PreciosDia
 from energia_monitor.sources.omie import parsear_marginalpdbc
 
 RAIZ = Path(__file__).resolve().parents[2]
-DASHBOARD = json.loads((RAIZ / "grafana" / "energia-monitor.json").read_text(encoding="utf-8"))
+DASHBOARD = json.loads((RAIZ / "grafana" / "energia-precios.json").read_text(encoding="utf-8"))
 FIXTURES = RAIZ / "tests" / "fixtures" / "omie"
 FUENTE = "dashboard"
 

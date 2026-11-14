@@ -42,13 +42,29 @@ Comprobación desde el contenedor de Grafana:
 
     docker exec <contenedor-grafana> getent hosts energia-db
 
-## 3. Dashboard
+## 3. Dashboards
 
-`energia-monitor.json` (Grafana 10.4, plugin `grafana-postgresql-datasource`).
+Un dashboard por tema (Grafana 10.4, plugin `grafana-postgresql-datasource`):
 
-Importar: Dashboards → New → Import → Upload dashboard JSON file. Arriba se
-elige el datasource (variable `ds`), el contrato y la fuente. Rango por
-defecto: hoy y mañana (zona Europe/Madrid).
+| Fichero | Título | `uid` |
+|---------|--------|-------|
+| `energia-precios.json` | Energía: precios | `energia-monitor` |
+| `energia-coche.json` | Energía: coche | `energia-coche` |
+
+Importar cada uno: Dashboards → New → Import → Upload dashboard JSON file.
+"Energía: precios" conserva el `uid` del antiguo dashboard único
+(`energia-monitor.json`): al importarlo, Grafana avisa de que ya existe y lo
+sobrescribe ("Import (Overwrite)"); desaparece la fila "Coche", que pasa al
+dashboard nuevo. Los enlaces guardados al dashboard de precios siguen
+valiendo.
+
+Todos llevan la etiqueta `energia` y, arriba a la derecha, el enlace
+"Energía", que lista los demás y conserva el rango y las variables
+(`keepTime` e `includeVars`). Por eso tienen las mismas variables: el
+datasource (`ds`), el contrato y la fuente. Rango por defecto: hoy y mañana
+(zona Europe/Madrid).
+
+### Energía: precios
 
 | Panel | Qué muestra |
 |-------|-------------|
@@ -70,7 +86,7 @@ vacíos y el resto del dashboard no cambia. Vistas: `v_comparacion_pvpc`
 (PVPC frente al contrato, por hora) y las columnas `ssaa_origen`,
 `ssaa_metodo` y `estado_componentes` de `v_precio_final`.
 
-### Fila "Coche" (fase 2, etapa 1)
+### Energía: coche (fase 2, etapa 1)
 
 Datos del servicio `muestreo` (requiere `VIARIS_URL`). Euros con IEE e IVA;
 kWh del coche corregidos con el factor del contador del cargador
@@ -95,15 +111,15 @@ que esos tramos no tienen energía ni coste de la casa. Vistas:
 `v_energia_tramo`, `v_coste_tramo` (por tramo y consumidor) y
 `v_sesion_coste`.
 
-Energía: la fila lee la tabla `energia_tramo` (migración 0013), que el
+Energía: el dashboard lee la tabla `energia_tramo` (migración 0013), que el
 muestreo mantiene al guardar cada muestra. Muestras insertadas o borradas por
 SQL no se ven hasta ejecutar `cargador recalcular` (docs/parametros.md).
 
-Precios: la fila "Coche" (y la comparación con el PVPC) leen
+Precios: "Energía: coche" (y la comparación con el PVPC) leen
 `mv_precio_final`, copia materializada de `v_precio_final` que el colector
 refresca al terminar cada ejecución. Un cambio hecho por SQL en parámetros,
 precios o series de ESIOS no se ve hasta ejecutar `refrescar`
-(docs/parametros.md). Los paneles de la fila de precios siguen leyendo
+(docs/parametros.md). Los paneles de "Energía: precios" siguen leyendo
 `v_precio_final` en directo.
 
 Las gráficas temporales dibujan el rango del selector (hoy, por defecto).

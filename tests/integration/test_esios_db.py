@@ -25,7 +25,7 @@ from energia_monitor.tiempo import limites_dia_utc
 
 RAIZ = Path(__file__).resolve().parents[2]
 FIXTURES = RAIZ / "tests" / "fixtures" / "esios"
-DASHBOARD = json.loads((RAIZ / "grafana" / "energia-monitor.json").read_text(encoding="utf-8"))
+DASHBOARD = json.loads((RAIZ / "grafana" / "energia-precios.json").read_text(encoding="utf-8"))
 PENINSULA = 8741
 QH = timedelta(minutes=15)
 DIA = date(2026, 11, 10)

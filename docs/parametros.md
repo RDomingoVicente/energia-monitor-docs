@@ -71,7 +71,7 @@ esa fila.
 
 ## Refrescar el precio materializado
 
-La fila "Coche" del dashboard y la comparación con el PVPC leen
+El dashboard "Energía: coche" y la comparación con el PVPC leen
 `mv_precio_final`, una copia materializada de `v_precio_final` (migración
 0012). Se refresca sola al final de cada ejecución del colector y al terminar
 `parametro registrar` (de contrato), `recargar`, `esios recargar` y
@@ -102,7 +102,7 @@ En migraciones:
 
 ## Recalcular la energía por tramo
 
-La fila "Coche" lee la energía por cuarto de hora de la tabla
+"Energía: coche" lee la energía por cuarto de hora de la tabla
 `energia_tramo`, que el servicio `muestreo` actualiza al guardar cada
 muestra. Si se insertan, corrigen o borran filas de `cargador_muestra` por
 SQL, hay que recalcular los días afectados (fechas locales, ambas incluidas):

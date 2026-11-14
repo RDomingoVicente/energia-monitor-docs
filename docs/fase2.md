@@ -1,6 +1,6 @@
 # Fase 2: medición y carga automática del coche
 
-Estado a 13/11/2026. Especificación funcional de la fase 2. La API del
+Estado a 14/11/2026. Especificación funcional de la fase 2. La API del
 cargador está en [viaris-api.md](viaris-api.md); el contexto del suministro y
 de la fase 1, en [contexto.md](contexto.md).
 
@@ -13,9 +13,11 @@ La fase se entrega en tres etapas independientes y en este orden:
 
 1. **Medición**: energía del coche y de la casa por cuarto de hora, sesiones
    de carga y coste en el dashboard. Solo lee del cargador.
-2. **Batería y formulario**: nivel de batería estimado, horarios, excepciones
-   y modos, con una página para introducirlos.
-3. **Planificador**: cálculo del plan y escritura de franjas en el cargador.
+2. **Batería y previsión**: nivel de batería estimado, horarios, excepciones
+   y energía necesaria para la próxima salida, con una página para
+   introducirlos.
+3. **Planificador**: cálculo del plan, escritura de franjas en el cargador y
+   modos "cargar ahora" y "automatización en pausa".
 
 Cada etapa se publica con su tag y queda en producción antes de empezar la
 siguiente.
@@ -186,44 +188,276 @@ descarga de precios.
   lo da en `modulator_processes`). Si existe, la energía por tramo pasará a
   calcularse por diferencia de contador; el diseño debe admitir ese origen.
 
-## Etapa 2: batería y formulario
+## Etapa 2: batería y previsión
 
-Etapa actual, pendiente de especificación (la etapa 1 se cerró el
-14/11/2026). Requisitos funcionales ya acordados:
+Etapa actual, especificada el 14/11/2026. Tarea y orden de entrega:
+[tareas/etapa-2-bateria.md](tareas/etapa-2-bateria.md).
 
-**Registro de batería.** Tabla de eventos con instante, tipo y valor:
+### Objetivo
 
-| Evento | Efecto | Origen |
-|--------|--------|--------|
-| Lectura manual | Fija el nivel (absoluto) | Formulario, con fecha y hora editables |
-| Carga completa | Fija el nivel en el tope | Cargador: deja de cargar y sigue conectado |
-| Sesión de carga cerrada | Suma energía × factor de conversión | Sesiones de la etapa 1 |
-| Trayecto | Resta el consumo previsto o declarado | Entre desconexión y reconexión |
+Saber en todo momento el nivel de batería estimado del coche y la energía
+necesaria para la próxima salida, con una página para el móvil donde anotar
+lecturas, excepciones y horarios. Un día normal no requiere ninguna acción.
 
-El nivel estimado es el último valor absoluto más los eventos posteriores. Una
-lectura con fecha pasada recalcula lo posterior. Factor de conversión del
-contador del cargador a batería: inicial 0,86, calibrado con pares de lecturas
-manuales. Se muestra siempre la antigüedad del último valor absoluto.
+Esta etapa **no escribe en el cargador**. Los modos "cargar ahora" y
+"automatización en pausa" pasan a la etapa 3.
 
-**Horarios.** Hora de salida habitual por día de la semana.
+### Decisiones tomadas
 
-**Consumo previsto.** Percentil alto del consumo diario de las últimas cuatro
-semanas (parámetro; valor inicial por decidir entre 75 y 90).
+- El nivel de batería se estima con un registro de eventos; no se lee del
+  coche.
+- **No se supone que el coche termine al 100 %**: el planificador cortará la
+  carga con precios altos. La carga completa solo es un valor absoluto cuando
+  se detecta (E2.3). La lectura manual es la fuente principal de valores
+  absolutos.
+- Consumo en dos niveles:
+  - para **estimar el nivel**, la mediana del consumo por trayecto de los
+    trayectos recientes (E2.4);
+  - para **planificar** (dato que usará la etapa 3), el P75 del consumo por
+    día de uso de las últimas cuatro semanas (E2.7).
+- Mediana y percentiles con interpolación lineal: `percentile_cont` en SQL
+  (la mediana es `percentile_cont(0.5)`) y el mismo criterio en la referencia
+  de Python de los tests.
+- Desconexiones de menos de 30 minutos: consumo cero (parámetro).
+- El cálculo vive en PostgreSQL (función de recálculo y vistas), con una
+  referencia en Python puro para los tests. El formulario, el CLI y el
+  muestreo llaman a la misma función.
+- Formulario: HTML generado en el servidor con Python, dentro de la misma
+  imagen, como tercer servicio del compose. Sin frameworks de frontend; el
+  JavaScript, solo si mejora algo concreto y nunca imprescindible.
+- Acceso: solo desde el tailnet, por HTTPS con el certificado de Tailscale,
+  sin usuario. Nunca detrás de Tailscale Funnel.
+- Grafana: un dashboard por tema, enlazados entre sí (E2.10).
+- Todo parámetro vive en tabla con vigencia y origen, como en la fase 1.
 
-**Excepciones con fecha.** Día sin coche, salida a otra hora, nivel objetivo
-concreto a una hora, viaje largo.
+### Requisitos
 
-**Modos.** "Cargar ahora" (sin restricción de precio, hasta un nivel o una
-hora, y vuelta automática al modo normal; queda registrado con su coste) y
-"automatización en pausa" (el sistema no escribe en el cargador).
+**E2.1 Registro de batería.** Registro de eventos con instante (UTC), tipo,
+valor, origen (manual, cargador, sistema), referencia (sesión o trayecto),
+nota y fecha de alta:
 
-**Formulario.** Página web para móvil servida desde el NAS dentro del tailnet:
-nivel estimado y su antigüedad, lectura de batería, excepciones, horarios,
-modos y parámetros. Un día normal no requiere ninguna acción.
+| Tipo | Efecto | Origen |
+|------|--------|--------|
+| `lectura` | Fija el nivel (valor absoluto) | Formulario o CLI, con fecha y hora editables |
+| `carga_completa` | Fija el nivel en `tope_pct` × `capacidad_util_kwh` | Detectada (E2.3) |
+| `sesion` | Suma la energía de la sesión × `factor_bateria` | Sesiones de la etapa 1 |
+| `trayecto` | Resta el consumo del trayecto | E2.4 |
+
+- El nivel se calcula internamente en kWh útiles; el porcentaje es
+  kWh / `capacidad_util_kwh` (91,3).
+- Nivel estimado = último valor absoluto + eventos posteriores, acotado entre
+  0 y la capacidad. A igual instante se aplican en este orden: sesión, carga
+  completa, trayecto, lectura.
+- Una lectura con fecha pasada recalcula todo lo posterior. No se admiten
+  lecturas con hora futura.
+- Las lecturas manuales se pueden corregir o anular (borrado lógico con
+  motivo), nunca se borran físicamente.
+- Durante una sesión abierta, el nivel "ahora" incluye la energía ya
+  entregada según el modulador (`coche_wh` de las muestras posteriores a la
+  última sesión registrada y al último valor absoluto) × `factor_bateria`. Al
+  cerrarse la sesión se usa el contador del cargador; se acepta el pequeño
+  salto entre los dos (0,3 % medido el 14/11/2026).
+- **Lectura a mitad de un evento** (el nivel se puede leer en remoto):
+  - con el coche fuera, el trayecto en curso se parte por tiempo: la parte
+    anterior a la lectura cuenta antes y el resto después;
+  - durante una carga, la sesión se parte por la energía del modulador antes
+    y después de la lectura.
+- Antes de la primera lectura no hay nivel: la página lo dice y pide una.
+
+**E2.2 Sesiones.** Cada sesión cerrada de `cargador_sesion` genera un evento
+`sesion` con su energía (contador del cargador) × `factor_bateria`
+(inicial 0,86, origen estimado). Idempotente: una sesión, un evento.
+
+**E2.3 Carga completa.** Se registra `carga_completa` cuando una sesión
+termina con origen `evsm` y el conector sigue conectado (estado 4 u 8) en la
+primera muestra posterior, dentro de los 180 s siguientes. Una sesión que
+termina con origen `schedman` es fin de franja, no carga completa (caso real:
+la sesión del 14/11/2026, de 03:00 a 06:00). Si falta la muestra posterior,
+no se registra el evento y el caso queda anotado como dudoso; mientras no han
+pasado 180 s desde el fin, la sesión queda pendiente de evaluar. **Sin
+verificar con el coche**: la regla se desactiva con `detectar_carga_completa`.
+
+**E2.4 Trayectos.**
+
+- Empieza en la transición de conectado (3, 4, 5, 6, 7, 8) a libre (1, 2) y
+  termina en la transición inversa, según `cargador_estado`. Sin una
+  transición anterior conocida no hay trayecto.
+- Duración menor que `desconexion_min_s` (inicial 1800): consumo cero.
+- Consumo estimado: mediana del consumo real por trayecto de los trayectos de
+  los `ventana_consumo_dias` (28) anteriores a su salida, excluidos los de
+  viaje largo y los cortos. Sin historia, `consumo_inicial_trayecto_kwh`
+  (inicial 25, origen usuario).
+- Si el día de salida tiene una excepción de viaje largo, sus trayectos usan
+  el consumo declarado, repartido entre los trayectos no cortos de ese día en
+  proporción a su duración.
+- Mientras el coche está fuera, la página muestra el nivel a la salida y
+  "fuera desde"; el trayecto se descuenta al reconectar.
+
+**E2.5 Reconciliación.** Entre dos valores absolutos consecutivos A1 y A2,
+el consumo real de los trayectos intermedios es
+A1 + energía de las sesiones × factor − A2.
+
+- Se reparte entre los trayectos no cortos del intervalo en proporción a su
+  consumo estimado (a partes iguales si todos los estimados son 0); esos
+  trayectos quedan con consumo real y origen `reconciliado`.
+- Si el resultado es negativo o supera la capacidad, no se aplica: se marca
+  el intervalo como incoherente y se muestra en la página.
+- La estadística de E2.4 y E2.7 usa solo trayectos con consumo real.
+
+**E2.6 Calibración del factor.** En un intervalo entre dos valores absolutos
+sin ningún trayecto (tampoco cortos), sin huecos de muestreo y con al menos
+`energia_min_calibracion_kwh` (5) cargados, factor observado = (A2 − A1) / kWh
+del contador del cargador. Se guardan las observaciones y se muestra el
+factor sugerido: la mediana de las últimas `observaciones_calibracion` (5).
+**No se aplica solo**: el usuario lo registra como nuevo valor del parámetro.
+
+**E2.7 Previsión.**
+
+- Horario semanal: hora de salida habitual por día de la semana, o "sin
+  salida".
+- Excepciones con fecha. **Solo hay una excepción activa por fecha**; la baja
+  es lógica.
+
+| Tipo | Campos |
+|------|--------|
+| Sin coche | Fecha |
+| Salida a otra hora | Fecha y hora |
+| Nivel objetivo | Fecha, hora y porcentaje |
+| Viaje largo | Fecha, hora de salida y consumo (en % de `capacidad_util_kwh` o en km) |
+
+- El consumo en km se convierte con `consumo_kwh_100km` (inicial 23, origen
+  usuario).
+- Próxima salida: la primera según horario y excepciones a partir de ahora.
+- Consumo para planificar: percentil `percentil_planificacion` (0,75) del
+  consumo por **día de uso** de los últimos 28 días. Día de uso: día local con
+  al menos un trayecto no corto, todos sus trayectos con consumo real y
+  ninguno de viaje largo; su consumo es la suma de sus trayectos. Sin
+  historia, el consumo inicial.
+- Energía necesaria para la próxima salida = max(0, reserva + consumo para
+  planificar − nivel estimado); con viaje largo, el consumo declarado en lugar
+  del percentil; con nivel objetivo, lo que falte para ese nivel. Nunca más
+  de lo que falte hasta el tope. Reserva: `reserva_pct` (25). Tope:
+  `tope_pct` (100). Con el coche fuera, el nivel estimado es el de la salida
+  menos el consumo estimado del trayecto en curso.
+- Vistas para la página, Grafana y la etapa 3: estado de la batería y
+  próximas salidas (la energía necesaria, solo de la primera: la de las
+  siguientes depende del plan de carga de la etapa 3).
+- Avisos del estado de la batería:
+  - intervalo incoherente (E2.5);
+  - sin lecturas en los últimos `aviso_sin_lectura_dias`;
+  - factor sugerido distinto del vigente (E2.6);
+  - **hueco de muestreo** de más de `hueco_muestreo_aviso_s` desde el último
+    valor absoluto: puede esconder un trayecto, así que el nivel estimado
+    queda marcado como dudoso hasta la siguiente lectura.
+
+**E2.8 Parámetros.** Tabla `bateria_parametro` con vigencia, origen, fuente y
+nota, siguiendo el patrón de `cargador_parametro`. Origen: contrato,
+regulado, estimado, usuario o ficha_tecnica. Los booleanos se guardan como
+0/1, con un CHECK por clave.
+
+| Clave | Inicial | Origen |
+|-------|---------|--------|
+| `capacidad_util_kwh` | 91,3 | ficha_tecnica |
+| `reserva_pct` | 25 | usuario |
+| `tope_pct` | 100 | usuario |
+| `factor_bateria` | 0,86 | estimado |
+| `percentil_planificacion` | 0,75 | usuario |
+| `ventana_consumo_dias` | 28 | usuario |
+| `desconexion_min_s` | 1800 | usuario |
+| `consumo_inicial_trayecto_kwh` | 25 | usuario |
+| `consumo_kwh_100km` | 23 | usuario |
+| `energia_min_calibracion_kwh` | 5 | usuario |
+| `observaciones_calibracion` | 5 | usuario |
+| `detectar_carga_completa` | 1 (sí) | usuario |
+| `aviso_sin_lectura_dias` | 7 | usuario |
+| `hueco_muestreo_aviso_s` | 1800 | usuario |
+
+**E2.9 Formulario.**
+
+- Servicio `formulario` en el compose, misma imagen, con `container_name`
+  fijo (lo usa el script de renovación del certificado del NAS).
+- HTTPS con `ssl` de la biblioteca estándar, como Miniflux: `server.crt` y
+  `server.key` en `/volume1/docker/energia-monitor/certs`, montado en solo
+  lectura; el directorio no va al repositorio. Puerto `8421:8443` enlazado a
+  la IP del NAS en el tailnet (`FORMULARIO_BIND`, 100.102.118.77):
+  https://rdv-nas.tail1aac93.ts.net:8421/. Arranque del NAS y renovación, en
+  deploy/README.md.
+- Rol de PostgreSQL propio, con escritura solo en las tablas que la página
+  necesita (lecturas, excepciones, horario y nuevos valores de parámetros),
+  sin DELETE, y permiso para ejecutar el recálculo.
+- Formularios clásicos con POST y redirección posterior (PRG); validación en
+  el servidor; horas introducidas y mostradas en Europe/Madrid, guardadas en
+  UTC; uso cómodo con una mano en el móvil.
+- Se rechazan las peticiones con otro `Host` y los POST de otro origen.
+  `/salud` (healthcheck) queda fuera de la comprobación de `Host` y responde
+  con el certificado real.
+- Pantallas:
+  1. **Inicio**: nivel estimado (% y kWh), antigüedad del último valor
+     absoluto y trayectos estimados desde entonces, estado del coche (en
+     casa, cargando o fuera desde), próxima salida y energía necesaria,
+     avisos (E2.7) y la **lectura rápida**: porcentaje, con la hora actual
+     por defecto.
+  2. **Excepciones**: próximas, alta y baja.
+  3. **Horario**: hora de salida por día de la semana.
+  4. **Historial**: lecturas con estimado frente a leído; corregir o anular.
+  5. **Parámetros**: valores vigentes y registro de un valor nuevo desde
+     hoy, con las mismas reglas que el CLI.
+- El diseño visual se fija con maquetas aprobadas antes de implementar las
+  pantallas (docs/formulario-maquetas.md).
+
+**E2.10 Grafana.**
+
+- El dashboard único se divide: "Energía: precios" conserva el `uid`
+  `energia-monitor` y la fila "Coche" pasa a "Energía: coche"
+  (`energia-coche`). Hecho el 14/11/2026 (paso 1 de la tarea).
+- Nuevo "Energía: batería": nivel estimado en el tiempo con las lecturas como
+  puntos, eventos como anotaciones, acierto de la estimación (estimado frente
+  a leído en cada lectura), próxima salida y energía necesaria, y trayectos
+  recientes con su consumo y origen.
+- Los tres llevan la etiqueta `energia` y un enlace de tipo dashboards por esa
+  etiqueta, con `keepTime` e `includeVars`. Un JSON por dashboard en
+  `grafana/`.
+- `grafana_ro` puede leer todas las tablas y vistas `bateria_*` y
+  `v_bateria_*`, pero no ejecutar el recálculo.
+
+**E2.11 CLI.** `bateria estado`, `bateria lectura --pct N [--instante ...]`,
+`bateria recalcular [--desde ...]` y `parametro registrar|listar --ambito
+bateria`.
+
+### Criterios de aceptación
+
+- Tests del cálculo del nivel con secuencias sintéticas: lectura retroactiva,
+  reconciliación con varios trayectos, desconexión corta, intervalo
+  incoherente, sesión abierta y lectura a mitad de un trayecto y de una carga.
+- Test de detección de trayectos y de fin de franja frente a carga completa
+  con la secuencia real del 13 al 14/11/2026
+  (`tests/fixtures/viaris/muestras-2026-11-13.log` y la sesión del 14/11, que
+  termina con `schedman`).
+- Tests de la mediana, el percentil y la calibración, con referencia en
+  Python puro y cálculo en SQL coincidentes.
+- Tests de la página con un cliente de pruebas: validación, PRG, zona horaria
+  y permisos del rol (no puede escribir fuera de sus tablas).
+- Test de los permisos de `grafana_ro` sobre las tablas y vistas de batería.
+- El cliente del cargador sigue admitiendo solo sus GET.
+- Migraciones nuevas desde la 0014; ninguna publicada se modifica.
+- Páginas por debajo de 300 ms y paneles por debajo de 1 s en el NAS.
+
+### Pendiente de verificar con el coche
+
+- La regla de carga completa (E2.3).
+- El estado del conector cuando el coche corta la carga por estar lleno (4 u
+  8).
 
 ## Etapa 3: planificador
 
 Se detalla al cerrar la etapa 2 y tras las pruebas de escritura pendientes.
+
+### Modos
+
+"Cargar ahora" (sin restricción de precio, hasta un nivel o una hora, y vuelta
+automática al modo normal; queda registrado con su coste) y "automatización
+en pausa" (el sistema no escribe en el cargador). Pasan aquí desde la etapa 2
+porque solo tienen sentido cuando el sistema escribe franjas.
 
 ### Cálculo
 

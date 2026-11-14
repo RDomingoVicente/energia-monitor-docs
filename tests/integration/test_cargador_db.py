@@ -1,5 +1,5 @@
 """Fase 2, etapa 1 contra PostgreSQL: persistencia del muestreo, energía por
-tramo, estimación de sesiones, coste y consultas de la fila "Coche".
+tramo, estimación de sesiones, coste y consultas del dashboard "Energía: coche".
 
 Muestras, sesiones y precios sintéticos; las vistas se comparan con la
 referencia en Python (energia_monitor.energia). Nunca se contacta con el
@@ -26,7 +26,7 @@ from energia_monitor.tiempo import limites_dia_utc
 from energia_monitor.viaris import ErrorCargador, EstadoConector, Modulador, Sesion
 
 RAIZ = Path(__file__).resolve().parents[2]
-DASHBOARD = json.loads((RAIZ / "grafana" / "energia-monitor.json").read_text(encoding="utf-8"))
+DASHBOARD = json.loads((RAIZ / "grafana" / "energia-coche.json").read_text(encoding="utf-8"))
 FUENTE = "cargador_test"
 QH = timedelta(minutes=15)
 MIN = timedelta(minutes=1)
@@ -551,7 +551,7 @@ def test_estado_y_huecos_del_dia(conn: psycopg.Connection, limpio: None) -> None
     assert len(muestreo.huecos_del_dia(conn, ahora + timedelta(minutes=10))) == 2
 
 
-# --- Consultas de la fila "Coche" ------------------------------------------------------------
+# --- Consultas de "Energía: coche" ------------------------------------------------------------
 
 
 def sql_panel(titulo: str, ahora: datetime, desde: datetime, hasta: datetime) -> str:

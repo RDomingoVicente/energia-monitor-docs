@@ -13,7 +13,7 @@ Antes de cualquier cambio, leer:
   de Grafana. Migraciones 0001 a 0009 publicadas.
 - Etapa 1 de la fase 2 cerrada el 14/11/2026 (v0.4.0): migraciones 0010
   (tablas del cargador) y 0011 (energía y coste), servicio `muestreo` en el
-  compose y fila "Coche" del dashboard. Pendiente conocido: calibración del
+  compose y fila "Coche" del dashboard (hoy "Energía: coche"). Pendiente conocido: calibración del
   cargador frente a la curva de i-DE.
 - v0.4.1 en producción desde el 14/11/2026: migración 0012, `mv_precio_final` (copia
   materializada de `v_precio_final`) que leen la fila "Coche" y la comparación
@@ -23,15 +23,17 @@ Antes de cualquier cambio, leer:
   cambiar muestras por SQL, `cargador recalcular`), y casa desconocida (NULL)
   en los tramos con carga.
 - Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 2, batería y
-  formulario, pendiente de especificación.** La etapa 3 no se empieza hasta
-  nuevo aviso.
+  previsión** (tarea: docs/tareas/etapa-2-bateria.md, cuatro pasos que se
+  revisan uno a uno). Paso 1 hecho: dashboards separados por tema
+  (`grafana/energia-precios.json` y `grafana/energia-coche.json`). La etapa
+  3 no se empieza hasta nuevo aviso.
 
 ## Estructura
 
 - src/energia_monitor/   código del colector
 - tests/                 pytest, con respuestas reales guardadas como fixtures
 - db/migrations/         migraciones SQL versionadas (NNNN_descripcion.sql)
-- grafana/               dashboard en JSON y notas del datasource
+- grafana/               dashboards en JSON (uno por tema) y notas del datasource
 - deploy/                docker-compose.yml y .env.example para el NAS
 - docs/                  contexto, especificaciones y tareas (docs/tareas/)
 - .gitea/workflows/      CI (tests en cada push; imagen a Harbor en cada tag v*)
