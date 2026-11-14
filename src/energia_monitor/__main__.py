@@ -1,10 +1,13 @@
-"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | parametro | esios | cargador].
+"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | refrescar | parametro | esios | cargador].
 
 - ejecutar (por defecto): migraciones, descarga de los días que falten desde
   CARGA_INICIAL_DESDE hasta mañana y actualización diaria planificada.
 - migrar: solo aplica las migraciones.
 - recargar --desde AAAA-MM-DD [--hasta AAAA-MM-DD] [--forzar]: recarga de
   históricos bajo demanda; sin --forzar solo descarga los días incompletos.
+- refrescar: recalcula mv_precio_final (necesario tras cambiar por SQL sus
+  datos de origen, ver docs/parametros.md); devuelve 1 si sus filas no son
+  las esperadas.
 - parametro registrar | listar: alta de parámetros de contrato con vigencia
   (ver docs/parametros.md).
 - esios recargar --desde AAAA-MM-DD [--hasta AAAA-MM-DD]: vuelve a descargar
@@ -18,6 +21,9 @@
   guardadas y huecos de hoy.
 - parametro ... --ambito cargador: parámetros del cargador (factor del
   contador, potencia de la estimación).
+
+recargar, esios recargar, esios estimar y parametro registrar (de contrato)
+refrescan mv_precio_final al terminar.
 """
 
 from __future__ import annotations
@@ -29,6 +35,8 @@ import sys
 import threading
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+
+import psycopg
 
 from energia_monitor import __version__, colector, db, esios, estimacion, muestreo, parametros, planificador
 from energia_monitor.config import Config
@@ -49,6 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     recargar.add_argument("--desde", type=date.fromisoformat, required=True)
     recargar.add_argument("--hasta", type=date.fromisoformat, help="por defecto, mañana")
     recargar.add_argument("--forzar", action="store_true", help="descarga también los días completos")
+    sub.add_parser("refrescar", help="recalcula mv_precio_final (tras cambios por SQL)")
 
     parametro = sub.add_parser("parametro", help="parámetros de contrato con vigencia")
     sub_param = parametro.add_subparsers(dest="accion", required=True)
@@ -107,12 +116,24 @@ ORDER BY d.contrato, i.control NULLS LAST, d.indicador
 """
 
 
+def _refrescar(conn: psycopg.Connection) -> bool:
+    """Refresca mv_precio_final tras un cambio en sus datos; False si falla."""
+    try:
+        db.refrescar_precio_final(conn)
+    except Exception:
+        log.exception("fallo al refrescar mv_precio_final: los cambios están guardados, pero la fila"
+                      " \"Coche\" y la comparación con el PVPC no los verán hasta ejecutar"
+                      " `python -m energia_monitor refrescar`")
+        return False
+    return True
+
+
 def _esios(args: argparse.Namespace, config: Config) -> int:
     with db.conectar() as conn:
         hoy = hoy_madrid()
         if args.accion == "estimar":
             estimacion.actualizar(conn, hoy)
-            return 0
+            return 0 if _refrescar(conn) else 1
         if args.accion == "estado":
             estado = esios.estado_prevision(conn)
             print(f"Previsión 1871: {estado.estado} ({estado.dias_verificados} día(s) comprobados,"
@@ -140,7 +161,8 @@ def _esios(args: argparse.Namespace, config: Config) -> int:
             log.error("%s", e)
             return 1
         esios.comprobar_controles(conn, args.desde, hasta)
-        return 1 if resumen.fallidos else 0
+        refrescada = _refrescar(conn)
+        return 1 if resumen.fallidos or not refrescada else 0
 
 
 def _parametro(args: argparse.Namespace) -> int:
@@ -175,7 +197,10 @@ def _parametro(args: argparse.Namespace) -> int:
         if registro.cerrada:
             log.info("vigencia anterior %s cerrada el %s", registro.cerrada, args.desde)
         log.info("registrado %s/%s = %s con vigencia %s", args.clave, args.periodo, args.valor, registro.nueva)
-        return 0
+        # Los parámetros del cargador se leen en directo; los de contrato entran en el precio.
+        if cargador:
+            return 0
+        return 0 if _refrescar(conn) else 1
 
 
 def _stop_por_senales() -> threading.Event:
@@ -211,6 +236,15 @@ def main(argv: list[str] | None = None) -> int:
             planificador.preparar_bd(conn, config)
         return 0
 
+    if orden == "refrescar":
+        try:
+            with db.conectar() as conn:
+                refresco = db.refrescar_precio_final(conn)
+        except Exception:
+            log.exception("fallo al refrescar mv_precio_final")
+            return 1
+        return 0 if refresco.completo else 1
+
     stop = _stop_por_senales()
     fuente = crear_fuente(config.price_source, config.intervalo_descargas_s)
 
@@ -222,7 +256,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 pendientes = colector.dias_incompletos(conn, fuente.nombre, args.desde, hasta)
             resumen = colector.descargar_dias(conn, fuente, pendientes, "recarga", stop)
-        return 1 if resumen.fallidos else 0
+            refrescada = _refrescar(conn)
+        return 1 if resumen.fallidos or not refrescada else 0
 
     cliente_esios = crear_cliente_esios(config.esios_token, config.intervalo_descargas_s)
     planificador.ejecutar(config, fuente, stop, cliente_esios=cliente_esios)

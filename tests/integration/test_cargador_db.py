@@ -20,7 +20,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from energia_monitor import muestreo, parametros
+from energia_monitor import db, muestreo, parametros
 from energia_monitor.energia import Muestra, energia_por_tramo, reparto_estimado
 from energia_monitor.tiempo import limites_dia_utc
 from energia_monitor.viaris import ErrorCargador, EstadoConector, Modulador, Sesion
@@ -82,6 +82,8 @@ def mercado(conn: psycopg.Connection, dia: date) -> None:
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany("INSERT INTO precio_mercado (inicio, fin, fuente, precio_eur_mwh) VALUES (%s, %s, %s, %s)",
                         filas)
+    # v_coste_tramo y v_sesion_coste leen mv_precio_final: como el colector, refrescar tras guardar.
+    db.refrescar_precio_final(conn)
 
 
 def sesion(conn: psycopg.Connection, inicio: datetime, fin: datetime, wh: str, id_: int | None = None) -> None:

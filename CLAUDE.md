@@ -11,9 +11,13 @@ Antes de cualquier cambio, leer:
 - Fase 1 en producción desde el 12/11/2026: colector de OMIE y ESIOS,
   PostgreSQL, precio final según contrato, comparación con el PVPC y dashboard
   de Grafana. Migraciones 0001 a 0009 publicadas.
-- Etapa 1 implementada (v0.4.0, pendiente de tag): migraciones 0010
-  (tablas del cargador) y 0011 (energía y coste), servicio `muestreo` en el
-  compose y fila "Coche" del dashboard.
+- Etapa 1 en producción (v0.4.0): migraciones 0010 (tablas del cargador) y
+  0011 (energía y coste), servicio `muestreo` en el compose y fila "Coche"
+  del dashboard.
+- v0.4.1 (pendiente de tag): migración 0012, `mv_precio_final` (copia
+  materializada de `v_precio_final`) que leen la fila "Coche" y la comparación
+  con el PVPC. Se refresca al final de cada ejecución del colector y de los
+  comandos que cambian sus datos; tras un cambio por SQL, `refrescar`.
 - Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 1, medición.**
   Las etapas 2 y 3 no se empiezan hasta nuevo aviso.
 
@@ -45,7 +49,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0012).
+  migración nueva (la siguiente es la 0013).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de

@@ -94,5 +94,12 @@ potencia de la casa queda marcada como no verificada hasta comprobar que
 `v_energia_tramo`, `v_coste_tramo` (por tramo y consumidor) y
 `v_sesion_coste`.
 
+Precios: la fila "Coche" (y la comparación con el PVPC) leen
+`mv_precio_final`, copia materializada de `v_precio_final` que el colector
+refresca al terminar cada ejecución. Un cambio hecho por SQL en parámetros,
+precios o series de ESIOS no se ve hasta ejecutar `refrescar`
+(docs/parametros.md). Los paneles de la fila de precios siguen leyendo
+`v_precio_final` en directo.
+
 El JSON está en el repositorio: los cambios hechos en la interfaz de Grafana
 se exportan (Share → Export) y se guardan aquí.

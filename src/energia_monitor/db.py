@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
@@ -84,3 +86,41 @@ def configurar_rol_grafana(conn: psycopg.Connection, password: str) -> None:
     conn.execute(
         sql.SQL("ALTER ROLE grafana_ro WITH LOGIN PASSWORD {}").format(sql.Literal(password))
     )
+
+
+@dataclass(frozen=True)
+class Refresco:
+    filas: int
+    esperadas: int
+    segundos: float
+
+    @property
+    def completo(self) -> bool:
+        return self.filas == self.esperadas
+
+
+SQL_FILAS_PRECIO_FINAL = """
+SELECT (SELECT count(*) FROM mv_precio_final),
+       (SELECT count(*) FROM precio_mercado) * (SELECT count(*) FROM contrato)
+"""
+
+
+def refrescar_precio_final(conn: psycopg.Connection) -> Refresco:
+    """Refresca mv_precio_final sin bloquear las lecturas y comprueba sus filas.
+
+    Esperadas: una por tramo de precio_mercado y contrato, como v_precio_final.
+    Hace falta tras cualquier cambio en sus datos de origen (docs/parametros.md).
+    """
+    inicio = time.monotonic()
+    conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_precio_final")
+    segundos = time.monotonic() - inicio
+    fila = conn.execute(SQL_FILAS_PRECIO_FINAL).fetchone()
+    assert fila is not None
+    refresco = Refresco(int(fila[0]), int(fila[1]), segundos)
+    if refresco.completo:
+        log.info("mv_precio_final refrescada en %.1f s: %d filas (esperadas %d)",
+                 segundos, refresco.filas, refresco.esperadas)
+    else:
+        log.warning("mv_precio_final refrescada en %.1f s con %d filas, pero se esperaban %d"
+                    " (tramos de precio_mercado por contratos)", segundos, refresco.filas, refresco.esperadas)
+    return refresco

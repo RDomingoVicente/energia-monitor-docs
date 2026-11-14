@@ -139,6 +139,25 @@ corrección) se usa el perfil de 14 días.
 - Grafana existente (stack de monitorización de Odoo: cAdvisor, Prometheus,
   Loki, Promtail, Alertmanager).
 
+### Imagen de PostgreSQL (fijada desde v0.4.1)
+
+- `deploy/docker-compose.yml` y el CI usan
+  `postgres:17-trixie@sha256:846a7ddaa67a4b354ae1d21087b683901aa6113a4ed626d3787cfbf6c85e3e07`:
+  PostgreSQL 17.12 (Debian 17.12-1.pgdg13+1) sobre Debian trixie, la imagen
+  que ejecuta el NAS. Lo que la fija es el digest; la etiqueta es para leerla.
+  Comprobado el 14/11/2026: ese digest es hoy el de `17` y `17-trixie`;
+  `17.12-trixie` tiene otro índice (`sha256:dbb9623d…`, sin riscv64) con la
+  misma imagen amd64 (`sha256:6f7593c1…`).
+- Motivo: la etiqueta flotante `postgres:17` pasó a una imagen con otra
+  glibc y la versión de collation de la base cambió de 2.36 a 2.41. El
+  13/11/2026 se ejecutaron en el NAS `REINDEX DATABASE energia` y
+  `ALTER DATABASE energia REFRESH COLLATION VERSION`.
+- Para cambiar de imagen: copia de seguridad de la base, nueva etiqueta y
+  digest en el compose y en el CI, y si cambia la distribución base (glibc),
+  repetir el `REINDEX DATABASE` y el `REFRESH COLLATION VERSION` antes de
+  dar el cambio por bueno. Los índices de texto (por ejemplo, el único de
+  `mv_precio_final`) dependen de la collation.
+
 ## Arquitectura decidida
 1. Colector en Python (contenedor Docker en el NAS):
    - Ejecución diaria tras la publicación de precios, con reintento por la tarde.

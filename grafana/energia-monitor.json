@@ -1476,7 +1476,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  (SELECT sum(coste_eur) / nullif(sum(energia_kwh), 0) FROM v_coste_tramo\n    WHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche') AS \"Coche (€/kWh)\",\n  (SELECT avg(precio_final_eur_kwh) FROM v_precio_final\n    WHERE $__timeFilter(inicio) AND inicio < now() AND contrato = '$contrato' AND fuente = '$fuente')\n    AS \"Media simple (€/kWh)\""
+          "rawSql": "SELECT\n  (SELECT sum(coste_eur) / nullif(sum(energia_kwh), 0) FROM v_coste_tramo\n    WHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche') AS \"Coche (€/kWh)\",\n  (SELECT avg(precio_final_eur_kwh) FROM mv_precio_final\n    WHERE $__timeFilter(inicio) AND inicio < now() AND contrato = '$contrato' AND fuente = '$fuente')\n    AS \"Media simple (€/kWh)\""
         }
       ],
       "fieldConfig": {
@@ -2139,5 +2139,5 @@
       }
     }
   ],
-  "version": 6
+  "version": 7
 }

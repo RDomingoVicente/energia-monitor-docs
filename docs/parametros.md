@@ -69,6 +69,37 @@ Si la restricción `contrato_parametro_sin_solape` rechaza el INSERT, hay otra
 fila posterior que se solapa: limita el `hasta` del nuevo valor al inicio de
 esa fila.
 
+## Refrescar el precio materializado
+
+La fila "Coche" del dashboard y la comparación con el PVPC leen
+`mv_precio_final`, una copia materializada de `v_precio_final` (migración
+0012). Se refresca sola al final de cada ejecución del colector y al terminar
+`parametro registrar` (de contrato), `recargar`, `esios recargar` y
+`esios estimar`.
+
+**Un cambio por SQL no la refresca.** Tras modificar a mano
+`contrato_parametro`, `contrato_ssaa_componente`, `ssaa_estimacion`,
+`serie_esios`, `precio_mercado` o `festivo`:
+
+    docker compose exec collector python -m energia_monitor refrescar
+
+El comando registra las filas de la materializada frente a las esperadas
+(tramos de `precio_mercado` por contratos) y devuelve 1 si no coinciden.
+Hasta refrescar, esos paneles muestran el precio anterior; el resto del
+dashboard (que lee `v_precio_final`) ya ve el cambio.
+
+En migraciones:
+
+- Una migración que cambie esos datos debe terminar con
+  `REFRESH MATERIALIZED VIEW mv_precio_final;` (dentro de la transacción
+  de la migración no hace falta `CONCURRENTLY`).
+- Si cambian las columnas de `v_precio_final`, hay que borrar
+  `mv_precio_final` (y las vistas que la leen) y volver a crearlas en la
+  misma migración.
+- PostgreSQL 17 crea y refresca las vistas materializadas con
+  `search_path = pg_catalog, pg_temp`: las funciones que use
+  `v_precio_final` deben cualificar sus tablas (`public.festivo`).
+
 ## SSAA: valor real de ESIOS y definición por contrato
 
 Con `ESIOS_TOKEN`, el SSAA de cada tramo sale de ESIOS y no de

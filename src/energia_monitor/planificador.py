@@ -3,7 +3,8 @@
 Dos calendarios: OMIE (HORARIOS) y, si hay ESIOS_TOKEN, ESIOS
 (ESIOS_HORARIOS). Tras cualquier ejecución con ESIOS activo se recalcula la
 estimación de SSAA. Los domingos, la primera ejecución de ESIOS recarga los
-últimos 90 días para detectar revisiones de REE.
+últimos 90 días para detectar revisiones de REE. Al final del arranque y de
+cada ejecución se refresca mv_precio_final una vez.
 """
 
 from __future__ import annotations
@@ -81,6 +82,7 @@ def ejecutar(
             )
         if cliente_esios is not None and not stop.is_set():
             _estimar(conn, hoy_madrid(reloj()))
+        _refrescar(conn)
 
     while not stop.is_set():
         planes = {"omie": config.horarios, "esios": config.esios_horarios if cliente_esios else ()}
@@ -110,6 +112,7 @@ def ejecutar(
                     )
                 if cliente_esios is not None and not stop.is_set():
                     _estimar(conn, hoy)
+                _refrescar(conn)
         except Exception:
             # El servicio sigue vivo: la siguiente ejecución lo reintentará.
             log.exception("fallo en la actualización planificada")
@@ -133,3 +136,12 @@ def _estimar(conn: psycopg.Connection, hoy: date) -> None:
         estimacion.actualizar(conn, hoy)
     except Exception:
         log.exception("fallo al estimar SSAA")
+
+
+def _refrescar(conn: psycopg.Connection) -> None:
+    """Un fallo solo se registra: los datos ya están guardados y el siguiente
+    ciclo vuelve a refrescar."""
+    try:
+        db.refrescar_precio_final(conn)
+    except Exception:
+        log.exception("fallo al refrescar mv_precio_final")

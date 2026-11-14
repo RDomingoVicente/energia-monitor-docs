@@ -46,8 +46,10 @@ franjas se probaron el 13/11/2026 con franjas inactivas y sin coche conectado.
 
 ### Estado de carga (`stat.state`)
 
-Del código de la interfaz; el 4 está verificado (coche conectado sin cargar,
-fuera de franja).
+Del código de la interfaz. Verificados con la carga del 14/11/2026 (muestras
+cada 60 s): 1 libre (`event` 2), 4 conectado sin cargar (`event` 7) y 6
+cargando (`event` 6). No han aparecido 3 ni 5: su diferencia con 4 y 6 sigue
+sin aclarar.
 
 | Valor | Significado |
 |-------|-------------|
@@ -59,7 +61,25 @@ fuera de franja).
 | 32 | Inoperativo |
 | otros | 14, 30, 31, 33: encendido, apagado, seleccionado; el resto, error |
 
-`localtime` es el instante del último cambio de estado, no la hora actual.
+`localtime` es el instante del último cambio de estado, no la hora actual
+(verificado el 14/11/2026).
+
+### Potencias del modulador (verificado el 14/11/2026)
+
+`totalPower` **no** es `evsePower + homePower`. Durante la carga,
+`homePower` = 0 y `totalPower` queda de media 218 W por debajo de
+`evsePower`: `homePower` se calcula como `max(0, totalPower − evsePower)`.
+
+- La casa no es medible mientras carga el coche: en esos tramos su consumo es
+  desconocido (no 0). Sigue marcada como no verificada.
+- El medidor del cargador (`evsePower`) y la pinza (`totalPower`) no cuadran
+  entre sí. Pendiente de calibrar con la curva horaria de i-DE.
+
+### Disponibilidad
+
+Aproximadamente cada 2 h el cargador no responde en 5 s y queda un hueco de
+unos 70 s entre muestras (14/11/2026), dentro del límite de 180 s: la muestra
+siguiente sigue contando.
 
 ### Histórico
 
@@ -179,9 +199,11 @@ Tiempo de espera de 5 s, sin reintentos, sin redirecciones y sin proxies. La
 dirección viene de `VIARIS_URL`. Las respuestas reales usadas como fixtures
 están en `tests/fixtures/viaris/` (firmware 7.7.34).
 
-Sin verificar todavía: si `homePower` excluye al coche (es decir, si
-`totalPower = evsePower + homePower` durante una carga); hasta entonces la
-energía de la casa se muestra como no verificada.
+Energía del coche verificada el 14/11/2026: la integrada por muestras desde
+un registro cada 60 s dio 13.678 Wh frente a los 13.667 Wh de la sesión del
+cargador (+0,08 %), y el servicio `muestreo` del NAS, con 180 muestras,
+13.624 Wh (−0,31 %). La energía de la casa no es fiable durante una carga
+(`homePower` = 0, ver "Potencias del modulador") y sigue como no verificada.
 
 ## Rutas que el código no debe usar
 
@@ -199,7 +221,10 @@ energía de la casa se muestra como no verificada.
 2. Qué hace el cargador sin ninguna franja activa (`defaultState`) y qué
    significan los campos de `stat` del planificador.
 3. Cómo reacciona a una franja creada, modificada o borrada durante una carga.
-4. Diferencia entre los estados 3 y 4, y valor de `state` durante la carga.
+4. Diferencia entre los estados 3 y 4, y entre 5 y 6 (con la carga del
+   14/11/2026 solo aparecieron 4 y 6).
+5. Calibración de `evsePower` frente a `totalPower` (la pinza) con la curva
+   horaria de i-DE.
 
 Sin coche: PUT con cuerpo parcial, DELETE múltiple, `validFrom` y `validTo`,
 y si `selectorPower` (4600 W) es un selector físico que limita los 32 A.

@@ -2,7 +2,10 @@ name: energia-monitor
 
 services:
   db:
-    image: postgres:17
+    # PostgreSQL 17.12 (Debian 17.12-1.pgdg13+1, trixie). Fija el digest: un cambio
+    # de glibc obliga a REINDEX (docs/contexto.md). 17.12-trixie tiene otro índice
+    # pero la misma imagen amd64 (6f7593c1…).
+    image: postgres:17-trixie@sha256:846a7ddaa67a4b354ae1d21087b683901aa6113a4ed626d3787cfbf6c85e3e07
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-energia}

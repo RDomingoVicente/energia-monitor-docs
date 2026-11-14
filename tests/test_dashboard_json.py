@@ -57,6 +57,13 @@ def test_paneles_del_coche_leen_las_vistas_nuevas(titulo: str) -> None:
         assert "consumidor = 'coche'" in sql
 
 
+def test_fila_coche_sin_v_precio_final() -> None:
+    # v_precio_final se calcula entera en cada consulta: la fila lee la materializada.
+    for titulo in FILA_COCHE:
+        assert "v_precio_final" not in PANELES[titulo]["targets"][0]["rawSql"].replace("mv_precio_final", ""), titulo
+    assert "FROM mv_precio_final" in PANELES["Precio medio pagado"]["targets"][0]["rawSql"]
+
+
 def test_casa_marcada_sin_verificar() -> None:
     panel = PANELES["Estado del cargador"]
     assert "Casa, sin verificar" in panel["targets"][0]["rawSql"]

@@ -93,6 +93,8 @@ def mercado(conn: psycopg.Connection, dia: date, precio: str = "100") -> None:
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany("INSERT INTO precio_mercado (inicio, fin, fuente, precio_eur_mwh) VALUES (%s, %s, %s, %s)",
                         filas)
+    # v_comparacion_pvpc lee mv_precio_final: como el colector, refrescar tras guardar.
+    db.refrescar_precio_final(conn)
 
 
 def contrato_con_definicion(conn: psycopg.Connection, nombre: str, incluidos: dict[int, bool]) -> None:
@@ -373,6 +375,7 @@ def test_comparacion_pvpc(conn: psycopg.Connection, dia_cargado: None) -> None:
 def test_comparacion_solo_horas_completas(conn: psycopg.Connection, dia_cargado: None) -> None:
     mercado(conn, DIA)
     conn.execute("DELETE FROM precio_mercado WHERE fuente = %s AND inicio = '2026-11-10 10:15Z'", (FUENTE,))
+    db.refrescar_precio_final(conn)
     n = conn.execute("SELECT count(*) FROM v_comparacion_pvpc WHERE contrato = 'vivienda' AND fuente = %s",
                      (FUENTE,)).fetchone()
     assert n == (23,)

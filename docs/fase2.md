@@ -92,8 +92,10 @@ del tramo. Columnas: energía, coste, periodo tarifario, coste equivalente con
 el PVPC, e indicadores de dato estimado (SSAA no real, tramo incompleto,
 origen de la energía). Lo mismo para la casa, sin factor (el factor se
 calibró con el contador del cargador; la casa la mide la pinza). La energía
-de la casa queda sin verificar hasta comprobar que totalPower = evsePower +
-homePower durante una carga. El factor y la potencia de E1.7 están en
+de la casa queda sin verificar: el 14/11/2026 se comprobó que totalPower no
+es evsePower + homePower (homePower = max(0, total − evse), 0 durante la
+carga), así que durante una carga la casa es desconocida (docs/viaris-api.md).
+El factor y la potencia de E1.7 están en
 `cargador_parametro`, no en `contrato_parametro`: allí `v_precio_final`
 marcaría como estimado todo tramo por un parámetro que no interviene en el
 precio. Coste por sesión: las muestras con instante dentro de [inicio, fin),
@@ -143,9 +145,25 @@ descarga de precios.
   coherente con la factura (término de energía 379,10 € sin impuestos para
   1262,45 kWh; al coche le corresponde en torno al 84 %).
 
+### Verificado con la carga del 14/11/2026
+
+- `stat.state`: 1 libre (`event` 2), 4 conectado sin cargar (`event` 7), 6
+  cargando (`event` 6); `localtime` es el instante del último cambio.
+- Energía del coche: 13.678 Wh integrados por muestras frente a 13.667 Wh de
+  la sesión del cargador (+0,08 %); el servicio `muestreo` del NAS, 180
+  muestras y 13.624 Wh (−0,31 %). Criterio de E1 (2 %) cumplido.
+- `totalPower` ≠ `evsePower` + `homePower`: durante la carga `homePower` = 0 y
+  `totalPower` queda de media 218 W por debajo de `evsePower`. La casa no es
+  medible durante la carga y sigue sin verificar. Pendiente de proponer que
+  esos tramos queden como desconocidos (NULL), no como 0, en una migración
+  nueva.
+- Huecos de unos 70 s cada ~2 h (el cargador no responde en 5 s), dentro del
+  límite de 180 s.
+
 ### Pendiente de verificar con el coche conectado
 
-- Valor de `stat.state` durante la carga y diferencia entre 3 y 4.
+- Estados 3 y 5 (no han aparecido) y su diferencia con 4 y 6.
+- Calibración del medidor del cargador frente a la pinza con la curva de i-DE.
 - Si existe una lectura HTTP del contador acumulado de energía (el WebSocket
   lo da en `modulator_processes`). Si existe, la energía por tramo pasará a
   calcularse por diferencia de contador; el diseño debe admitir ese origen.
