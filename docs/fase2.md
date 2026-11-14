@@ -57,6 +57,10 @@ siguiente.
 
 ## Etapa 1: medición
 
+**Cerrada el 14/11/2026** (v0.4.0 y v0.4.1 en producción). Pendiente
+conocido: calibrar el medidor del cargador y la pinza frente a la curva
+cuartohoraria de i-DE.
+
 ### Requisitos
 
 **E1.1 Cliente del cargador.** Módulo con las lecturas de viaris-api.md. Lista
@@ -154,7 +158,10 @@ descarga de precios.
 - `grafana_ro` puede leer las tablas y vistas nuevas.
 - Comprobación manual: el coste estimado del coche en octubre de 2026 es
   coherente con la factura (término de energía 379,10 € sin impuestos para
-  1262,45 kWh; al coche le corresponde en torno al 84 %).
+  1262,45 kWh; al coche le corresponde en torno al 84 %). **Cumplido**
+  (14/11/2026, en el NAS): coche 1.061,6 kWh y 320,96 € sin impuestos
+  (0,3024 €/kWh), el 84,1 % de la energía de la factura. Residual de la casa:
+  200,8 kWh a 0,290 €/kWh.
 
 ### Verificado con la carga del 14/11/2026
 
@@ -181,7 +188,8 @@ descarga de precios.
 
 ## Etapa 2: batería y formulario
 
-Se detalla al cerrar la etapa 1. Requisitos funcionales ya acordados:
+Etapa actual, pendiente de especificación (la etapa 1 se cerró el
+14/11/2026). Requisitos funcionales ya acordados:
 
 **Registro de batería.** Tabla de eventos con instante, tipo y valor:
 

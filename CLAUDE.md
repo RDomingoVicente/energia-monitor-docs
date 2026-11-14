@@ -11,18 +11,20 @@ Antes de cualquier cambio, leer:
 - Fase 1 en producción desde el 12/11/2026: colector de OMIE y ESIOS,
   PostgreSQL, precio final según contrato, comparación con el PVPC y dashboard
   de Grafana. Migraciones 0001 a 0009 publicadas.
-- Etapa 1 en producción (v0.4.0): migraciones 0010 (tablas del cargador) y
-  0011 (energía y coste), servicio `muestreo` en el compose y fila "Coche"
-  del dashboard.
-- v0.4.1 (pendiente de tag): migración 0012, `mv_precio_final` (copia
+- Etapa 1 de la fase 2 cerrada el 14/11/2026 (v0.4.0): migraciones 0010
+  (tablas del cargador) y 0011 (energía y coste), servicio `muestreo` en el
+  compose y fila "Coche" del dashboard. Pendiente conocido: calibración del
+  cargador frente a la curva de i-DE.
+- v0.4.1 en producción desde el 14/11/2026: migración 0012, `mv_precio_final` (copia
   materializada de `v_precio_final`) que leen la fila "Coche" y la comparación
   con el PVPC. Se refresca al final de cada ejecución del colector y de los
   comandos que cambian sus datos; tras un cambio por SQL, `refrescar`.
   Migración 0013: tabla `energia_tramo`, que mantiene el muestreo (tras
   cambiar muestras por SQL, `cargador recalcular`), y casa desconocida (NULL)
   en los tramos con carga.
-- Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 1, medición.**
-  Las etapas 2 y 3 no se empiezan hasta nuevo aviso.
+- Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 2, batería y
+  formulario, pendiente de especificación.** La etapa 3 no se empieza hasta
+  nuevo aviso.
 
 ## Estructura
 
