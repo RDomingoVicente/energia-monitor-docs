@@ -73,9 +73,19 @@ potencia leída. Si han pasado más de 180 s (o es la primera muestra), el
 intervalo es NULL y la muestra no cuenta energía: el hueco no se rellena. El muestreo corre como proceso continuo, separado de la
 descarga diaria de precios (segundo servicio del compose con la misma imagen).
 
-**E1.3 Energía por tramo.** Vista por cuarto de hora con la energía del coche,
-de la casa y total (Wh = suma de potencia × intervalo / 3600) y los segundos
-cubiertos. Un tramo con menos de 840 s cubiertos se marca como incompleto.
+**E1.3 Energía por tramo.** Energía por cuarto de hora del coche, de la casa
+y total (Wh = suma de potencia × intervalo / 3600) y los segundos cubiertos.
+Un tramo con menos de 840 s cubiertos se marca como incompleto. Desde la
+migración 0013 se guarda en la tabla `energia_tramo`: el muestreo, en la
+misma transacción que guarda cada muestra, recalcula desde `cargador_muestra`
+los tramos que esa muestra cubre (uno, o dos si cruza el cuarto de hora), así
+que repetir una muestra no duplica energía. Tras insertar o borrar muestras
+por SQL hay que ejecutar `cargador recalcular --desde AAAA-MM-DD`;
+`cargador estado` compara los dos últimos días con el cálculo desde las
+muestras, avisa si difieren y devuelve 1. En los tramos con alguna muestra de
+carga (`evse_w` > 0) la energía de la casa es desconocida (NULL, no 0); la
+del coche y la total no cambian. La casa no se calcula como total − coche:
+el medidor del cargador y la pinza no cuadran y saldría negativa.
 
 **E1.4 Sesiones.** Cada 15 min se lee `GET /modules/modulator/historic` y se
 insertan de forma idempotente las sesiones (identificador, conector, inicio,
@@ -94,7 +104,8 @@ origen de la energía). Lo mismo para la casa, sin factor (el factor se
 calibró con el contador del cargador; la casa la mide la pinza). La energía
 de la casa queda sin verificar: el 14/11/2026 se comprobó que totalPower no
 es evsePower + homePower (homePower = max(0, total − evse), 0 durante la
-carga), así que durante una carga la casa es desconocida (docs/viaris-api.md).
+carga), así que durante una carga la casa es desconocida (docs/viaris-api.md):
+esos tramos no tienen fila de casa en `v_coste_tramo` (0013).
 El factor y la potencia de E1.7 están en
 `cargador_parametro`, no en `contrato_parametro`: allí `v_precio_final`
 marcaría como estimado todo tramo por un parámetro que no interviene en el
@@ -154,9 +165,9 @@ descarga de precios.
   muestras y 13.624 Wh (−0,31 %). Criterio de E1 (2 %) cumplido.
 - `totalPower` ≠ `evsePower` + `homePower`: durante la carga `homePower` = 0 y
   `totalPower` queda de media 218 W por debajo de `evsePower`. La casa no es
-  medible durante la carga y sigue sin verificar. Pendiente de proponer que
-  esos tramos queden como desconocidos (NULL), no como 0, en una migración
-  nueva.
+  medible durante la carga y sigue sin verificar. Desde la migración 0013,
+  los tramos con alguna muestra de carga tienen la casa como desconocida
+  (NULL), no como 0; `total_wh` se mantiene.
 - Huecos de unos 70 s cada ~2 h (el cargador no responde en 5 s), dentro del
   límite de 180 s.
 

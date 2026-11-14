@@ -26,6 +26,7 @@ PUBLICADAS = {
     "0010_cargador.sql": "486f9b9db6d26fe8031336b4e1aeff305df1b5bc169990e55c82d3b730bb5440",
     "0011_energia_coste.sql": "13f63836764a3ff425656c2c1da2cb1b127dfb2a04e4ef9d95cea5221e5ea20d",
     "0012_precio_final_materializado.sql": "dfd9feb9f3b93f36c9c9fecd1e2a242b86a66305a1d8e03d64498fcdd4ca1ab6",
+    "0013_energia_tramo.sql": "8b3be0b2eff22a5161ffe7660b2c09123d3e61b142279d1640ce525f61d7759c",
 }
 
 

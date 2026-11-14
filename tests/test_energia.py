@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal as D
 
 from energia_monitor.energia import (
+    TRAMO,
     Muestra,
     coste,
     energia_por_tramo,
@@ -89,3 +90,15 @@ def test_reparto_estimado_vacio() -> None:
 
 def test_coste_en_decimal() -> None:
     assert coste(D(1100), D("0.96"), D("0.123456")) == D("0.13036953600")
+
+
+def test_casa_desconocida_si_alguna_muestra_del_tramo_carga() -> None:
+    t0 = datetime(2026, 11, 14, 20, 0, tzinfo=UTC)
+    muestras = [Muestra(t0 + timedelta(minutes=i), None if i == 0 else 60,
+                        D(0) if i <= 20 else D(4400), D(350) if i <= 20 else D(0),
+                        D(350) if i <= 20 else D(4182)) for i in range(32)]
+    tramos = energia_por_tramo(muestras)
+    assert tramos[t0].casa_wh == D("87.5")
+    assert tramos[t0 + TRAMO].casa_wh is None            # carga desde las 20:20
+    assert tramos[t0 + 2 * TRAMO].casa_wh is None        # solo la muestra de las 20:31, cargando
+    assert tramos[t0 + TRAMO].total_wh > 0

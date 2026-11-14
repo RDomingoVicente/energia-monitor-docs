@@ -100,6 +100,27 @@ En migraciones:
   `search_path = pg_catalog, pg_temp`: las funciones que use
   `v_precio_final` deben cualificar sus tablas (`public.festivo`).
 
+## Recalcular la energía por tramo
+
+La fila "Coche" lee la energía por cuarto de hora de la tabla
+`energia_tramo`, que el servicio `muestreo` actualiza al guardar cada
+muestra. Si se insertan, corrigen o borran filas de `cargador_muestra` por
+SQL, hay que recalcular los días afectados (fechas locales, ambas incluidas):
+
+```sh
+docker compose exec collector python -m energia_monitor cargador recalcular --desde 2026-11-14 --hasta 2026-11-15
+```
+
+`--hasta` es hoy por defecto. El recálculo es idempotente y tarda unos
+segundos incluso con un año de muestras. `cargador estado` compara los dos
+últimos días de `energia_tramo` con el cálculo desde las muestras; si no
+coinciden, muestra un aviso con el comando y devuelve 1.
+
+Al desplegar la versión que aplica la migración 0013, el muestreo anterior
+puede guardar alguna muestra entre la migración y su reinicio sin actualizar
+la tabla: tras `docker compose up -d`, ejecutar `cargador estado` y, si
+avisa, `cargador recalcular --desde` con la fecha de hoy.
+
 ## SSAA: valor real de ESIOS y definición por contrato
 
 Con `ESIOS_TOKEN`, el SSAA de cada tramo sale de ESIOS y no de

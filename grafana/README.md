@@ -82,17 +82,22 @@ kWh del coche corregidos con el factor del contador del cargador
 | Gasto en el rango | Euros, kWh y €/kWh medio del rango del selector; kWh estimados aparte |
 | Precio medio pagado | €/kWh del coche (ponderado) frente a la media simple del precio final en el mismo rango, hasta ahora |
 | Frente al PVPC | Coste real y coste con el PVPC de la misma energía (solo tramos con PVPC) |
-| Estado del cargador | Estado del conector, potencia del coche y de la casa (sin verificar) y antigüedad de la última muestra (rojo desde 180 s) |
+| Estado del cargador | Estado del conector, potencia del coche y de la casa (sin verificar; vacía mientras carga) y antigüedad de la última muestra (rojo desde 180 s) |
 | Gasto diario del coche (30 días) | Euros medidos y estimados apilados y kWh en el eje derecho |
 | Reparto por periodo | kWh, euros y €/kWh por periodo 2.0TD en el rango |
 | Sesiones recientes | Últimas 15 sesiones: inicio, fin, kWh, euros, €/kWh, origen (medida o estimada) y diferencia con la energía del cargador |
 
 Origen de la energía: `muestreo` (muestras de potencia) o `estimado_sesion`
 (sesiones anteriores al muestreo, repartidas a potencia constante). La
-potencia de la casa queda marcada como no verificada hasta comprobar que
-`totalPower = evsePower + homePower` durante una carga. Vistas:
+potencia de la casa sigue sin verificar y, durante una carga, es desconocida:
+el cargador da `homePower` = 0 mientras carga (verificado el 14/11/2026), así
+que esos tramos no tienen energía ni coste de la casa. Vistas:
 `v_energia_tramo`, `v_coste_tramo` (por tramo y consumidor) y
 `v_sesion_coste`.
+
+Energía: la fila lee la tabla `energia_tramo` (migración 0013), que el
+muestreo mantiene al guardar cada muestra. Muestras insertadas o borradas por
+SQL no se ven hasta ejecutar `cargador recalcular` (docs/parametros.md).
 
 Precios: la fila "Coche" (y la comparación con el PVPC) leen
 `mv_precio_final`, copia materializada de `v_precio_final` que el colector

@@ -18,7 +18,11 @@
 - cargador muestrear: servicio de muestreo del cargador (requiere VIARIS_URL;
   sin ella queda en espera).
 - cargador estado: cargador alcanzable o no, última muestra, sesiones
-  guardadas y huecos de hoy.
+  guardadas, huecos de hoy y coherencia de energia_tramo con las muestras
+  de los últimos 2 días; devuelve 1 si no coinciden.
+- cargador recalcular --desde AAAA-MM-DD [--hasta AAAA-MM-DD]: recalcula
+  energia_tramo desde las muestras en esos días locales (tras insertar o
+  borrar muestras por SQL).
 - parametro ... --ambito cargador: parámetros del cargador (factor del
   contador, potencia de la estimación).
 
@@ -42,7 +46,7 @@ from energia_monitor import __version__, colector, db, esios, estimacion, muestr
 from energia_monitor.config import Config
 from energia_monitor.errores import ErrorAutenticacion
 from energia_monitor.sources import crear_cliente_esios, crear_fuente
-from energia_monitor.tiempo import dias, hoy_madrid
+from energia_monitor.tiempo import dias, hoy_madrid, limites_dia_utc
 from energia_monitor.viaris import ClienteViaris
 
 log = logging.getLogger("energia_monitor")
@@ -88,7 +92,10 @@ def _parser() -> argparse.ArgumentParser:
     cargador = sub.add_parser("cargador", help="cargador Orbis Viaris (solo lecturas)")
     sub_cargador = cargador.add_subparsers(dest="accion", required=True)
     sub_cargador.add_parser("muestrear", help="servicio de muestreo continuo")
-    sub_cargador.add_parser("estado", help="alcanzable, última muestra, sesiones y huecos de hoy")
+    sub_cargador.add_parser("estado", help="alcanzable, última muestra, sesiones, huecos y coherencia")
+    recalcular = sub_cargador.add_parser("recalcular", help="recalcula energia_tramo desde las muestras")
+    recalcular.add_argument("--desde", type=date.fromisoformat, required=True)
+    recalcular.add_argument("--hasta", type=date.fromisoformat, help="por defecto, hoy")
     return parser
 
 
@@ -102,10 +109,22 @@ def _cargador(args: argparse.Namespace, config: Config) -> int:
         muestreo.ejecutar(cliente, _stop_por_senales())
         log.info("parada completada")
         return 0
+    if args.accion == "recalcular":
+        hasta = args.hasta or hoy_madrid()
+        if hasta < args.desde:
+            print("--hasta es anterior a --desde", file=sys.stderr)
+            return 2
+        desde_utc, _ = limites_dia_utc(args.desde)
+        _, hasta_utc = limites_dia_utc(hasta)
+        with db.conectar() as conn, conn.transaction():
+            n = muestreo.recalcular_tramos(conn, desde_utc, hasta_utc)
+        print(f"energia_tramo recalculada del {args.desde} al {hasta}: {n} tramo(s) con energía")
+        return 0
     with db.conectar() as conn:
-        for linea in muestreo.estado(conn, cliente, datetime.now(UTC)):
-            print(linea)
-    return 0
+        lineas = muestreo.estado(conn, cliente, datetime.now(UTC))
+    for linea in lineas:
+        print(linea)
+    return 1 if any(linea.startswith(muestreo.AVISO) for linea in lineas) else 0
 
 
 SQL_DEFINICION_SSAA = """

@@ -18,6 +18,9 @@ Antes de cualquier cambio, leer:
   materializada de `v_precio_final`) que leen la fila "Coche" y la comparación
   con el PVPC. Se refresca al final de cada ejecución del colector y de los
   comandos que cambian sus datos; tras un cambio por SQL, `refrescar`.
+  Migración 0013: tabla `energia_tramo`, que mantiene el muestreo (tras
+  cambiar muestras por SQL, `cargador recalcular`), y casa desconocida (NULL)
+  en los tramos con carga.
 - Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 1, medición.**
   Las etapas 2 y 3 no se empiezan hasta nuevo aviso.
 
@@ -49,7 +52,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0013).
+  migración nueva (la siguiente es la 0014).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de

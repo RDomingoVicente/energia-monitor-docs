@@ -33,11 +33,11 @@ MIN = timedelta(minutes=1)
 DIA = date(2026, 11, 5)
 OBJETOS_NUEVOS = ["cargador_parametro_clave", "cargador_parametro", "cargador_muestra", "cargador_estado",
                   "cargador_sesion", "v_energia_muestra", "v_energia_tramo_medida", "v_energia_sesion_estimada",
-                  "v_energia_tramo", "v_coste_tramo", "v_sesion_coste"]
+                  "v_energia_tramo", "v_coste_tramo", "v_sesion_coste", "energia_tramo"]
 
 
 def limpiar(conn: psycopg.Connection) -> None:
-    for tabla in ("cargador_muestra", "cargador_estado", "cargador_sesion"):
+    for tabla in ("cargador_muestra", "cargador_estado", "cargador_sesion", "energia_tramo"):
         conn.execute(f"DELETE FROM {tabla}")  # type: ignore[arg-type]
     conn.execute("DELETE FROM cargador_parametro WHERE fuente = 'test'")
     conn.execute("UPDATE cargador_parametro SET vigencia = daterange(lower(vigencia), NULL, '[)')")
@@ -53,12 +53,15 @@ def limpio(conn: psycopg.Connection):
 
 
 def insertar_muestras(conn: psycopg.Connection, muestras: list[Muestra], estado: int | None = None) -> None:
+    """Inserción por SQL, como haría el usuario: después hay que recalcular energia_tramo."""
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO cargador_muestra (instante, intervalo_s, evse_w, home_w, total_w, estado)"
             " VALUES (%s, %s, %s, %s, %s, %s)",
             [(m.instante, m.intervalo_s, m.evse_w, m.home_w, m.total_w, estado) for m in muestras],
         )
+        muestreo.recalcular_tramos(conn, min(m.instante for m in muestras) - timedelta(seconds=180),
+                                   max(m.instante for m in muestras))
 
 
 def serie(desde: datetime, hasta: datetime, potencia: Any = lambda i: D(4400)) -> list[Muestra]:
@@ -94,7 +97,9 @@ def sesion(conn: psycopg.Connection, inicio: datetime, fin: datetime, wh: str, i
     muestreo.guardar_sesiones(conn, [s])
 
 
-def cerca(a: D, b: D, tolerancia: str = "1e-9") -> bool:
+def cerca(a: D | None, b: D | None, tolerancia: str = "1e-9") -> bool:
+    if a is None or b is None:
+        return a is b
     return abs(a - b) <= D(tolerancia)
 
 
@@ -175,6 +180,117 @@ def test_dia_del_cambio_de_hora(conn: psycopg.Connection, limpio: None) -> None:
     assert fila == (100, D(25_000), False)  # 25 h a 1 kW
 
 
+# --- Casa desconocida durante la carga (0013) ----------------------------------------------
+
+
+def test_casa_desconocida_en_tramos_con_carga(conn: psycopg.Connection, limpio: None) -> None:
+    # Sin carga hasta las 20:20 y cargando desde las 20:21: como en el registro del 14/11/2026,
+    # home_w = 0 y total_w por debajo de evse_w durante la carga.
+    muestras = [Muestra(T0 + i * MIN, None if i == 0 else 60,
+                        D(0) if i <= 20 else D(4400),
+                        D(350) if i <= 20 else D(0),
+                        D(350) if i <= 20 else D(4182))
+                for i in range(61)]
+    insertar_muestras(conn, muestras)
+    obtenido = tramos_medidos(conn)
+    esperado = energia_por_tramo(muestras)
+    assert set(obtenido) == set(esperado) == {T0, T0 + QH, T0 + 2 * QH, T0 + 3 * QH}
+    for tramo, e in esperado.items():
+        coche, casa, total, *_ = obtenido[tramo]
+        assert cerca(coche, e.coche_wh) and cerca(casa, e.casa_wh) and cerca(total, e.total_wh), tramo
+    assert obtenido[T0][1] == D("87.5")              # 15 min a 350 W
+    assert obtenido[T0 + QH][1] is None              # mixto: carga desde las 20:20
+    assert obtenido[T0 + 2 * QH][1] is None          # todo cargando: desconocida, no 0
+    assert obtenido[T0 + QH][2] > 0                  # total se mantiene
+    # Sin fila de casa (ni coste 0) en los tramos con carga.
+    mercado(conn, DIA)
+    casa = {r[0] for r in conn.execute("SELECT inicio FROM v_coste_tramo WHERE consumidor = 'casa'"
+                                       " AND fuente = %s", (FUENTE,))}
+    assert casa == {T0}
+
+
+# --- energia_tramo mantenida por el muestreo (0013) ----------------------------------------
+
+
+def guardado_igual_al_calculo(conn: psycopg.Connection) -> bool:
+    c = muestreo.coherencia_tramos(conn, datetime(2000, 1, 1, tzinfo=UTC), datetime(2100, 1, 1, tzinfo=UTC))
+    return c.distintos == 0
+
+
+def test_muestra_que_cruza_el_cuarto_de_hora_recalcula_los_dos_tramos(conn: psycopg.Connection,
+                                                                     limpio: None) -> None:
+    base = datetime(2026, 11, 5, 10, 0, 30, tzinfo=UTC)
+    for i in range(14):  # 10:00:30 a 10:13:30
+        muestreo.guardar_muestra(conn, base + i * MIN, MOD, 6)
+    antes = conn.execute("SELECT inicio, cubierto_s FROM energia_tramo").fetchall()
+    assert antes == [(base.replace(second=0), D(780))]
+    # 10:14:30 -> 10:15:30 cubre 30 s de cada tramo.
+    muestreo.guardar_muestra(conn, base + 14 * MIN, MOD, 6)
+    muestreo.guardar_muestra(conn, base + 15 * MIN, MOD, 6)
+    filas = dict(conn.execute("SELECT inicio, cubierto_s FROM energia_tramo ORDER BY inicio").fetchall())
+    assert filas == {base.replace(second=0): D(870), base.replace(minute=15, second=0): D(30)}
+    coche = dict(conn.execute("SELECT inicio, coche_wh FROM energia_tramo").fetchall())
+    assert cerca(coche[base.replace(minute=15, second=0)], MOD.evse_w * 30 / 3600)
+    assert guardado_igual_al_calculo(conn)
+
+
+def test_muestra_repetida_no_duplica_energia(conn: psycopg.Connection, limpio: None) -> None:
+    for i in range(5):
+        muestreo.guardar_muestra(conn, T0 + i * MIN, MOD, 6)
+    antes = conn.execute("SELECT * FROM energia_tramo").fetchall()
+    muestreo.guardar_muestra(conn, T0 + 4 * MIN, MOD, 6)
+    assert muestreo.recalcular_tramos(conn, T0, T0 + 4 * MIN) == 1
+    assert conn.execute("SELECT * FROM energia_tramo").fetchall() == antes
+    assert cerca(conn.execute("SELECT coche_wh FROM energia_tramo").fetchone()[0], MOD.evse_w * 240 / 3600)  # type: ignore[index]
+
+
+def test_tras_un_hueco_la_muestra_no_cuenta(conn: psycopg.Connection, limpio: None) -> None:
+    muestreo.guardar_muestra(conn, T0, MOD, 6)
+    muestreo.guardar_muestra(conn, T0 + MIN, MOD, 6)
+    muestreo.guardar_muestra(conn, T0 + 6 * MIN, MOD, 6)  # hueco de 5 min: intervalo NULL
+    assert conn.execute("SELECT cubierto_s FROM energia_tramo").fetchall() == [(D(60),)]
+    assert guardado_igual_al_calculo(conn)
+
+
+def test_ciclo_del_muestreador_mantiene_energia_tramo(conn: psycopg.Connection, limpio: None) -> None:
+    ahora = [T0 - 30 * MIN]
+    m = muestreo.Muestreador(ClienteFalso(), lambda: ahora[0])  # type: ignore[arg-type]
+    for _ in range(40):
+        m.ciclo(conn)
+        ahora[0] += MIN
+    assert conn.execute("SELECT count(*) FROM energia_tramo").fetchone() == (3,)
+    assert guardado_igual_al_calculo(conn)
+
+
+def test_estado_avisa_si_energia_tramo_no_coincide_y_recalcular_lo_corrige(
+        conn: psycopg.Connection, nombre_bd: str, limpio: None, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    from energia_monitor import __main__ as cli
+
+    monkeypatch.setattr(db, "conectar", lambda **_: psycopg.connect(dbname=nombre_bd, autocommit=True))
+    monkeypatch.delenv("VIARIS_URL", raising=False)
+    ahora = datetime.now(UTC).replace(microsecond=0)
+    for i in range(30, 0, -1):
+        muestreo.guardar_muestra(conn, ahora - i * MIN, MOD, 6)
+    assert cli.main(["cargador", "estado"]) == 0
+    assert "coinciden con las muestras" in capsys.readouterr().out
+
+    # Muestras insertadas por SQL sin recalcular y un tramo alterado a mano.
+    conn.execute("INSERT INTO cargador_muestra (instante, intervalo_s, evse_w, home_w, total_w)"
+                 " VALUES (%s, 60, 0, 300, 300)", (ahora,))
+    conn.execute("UPDATE energia_tramo SET coche_wh = coche_wh + 1 WHERE inicio = (SELECT min(inicio)"
+                 " FROM energia_tramo)")
+    assert cli.main(["cargador", "estado"]) == 1
+    salida = capsys.readouterr().out
+    assert "AVISO: energía por tramo" in salida and "cargador recalcular --desde" in salida
+
+    desde = (ahora - timedelta(days=1)).astimezone(muestreo.MADRID).date()
+    assert cli.main(["cargador", "recalcular", "--desde", desde.isoformat()]) == 0
+    assert "energia_tramo recalculada" in capsys.readouterr().out
+    assert cli.main(["cargador", "estado"]) == 0
+    assert guardado_igual_al_calculo(conn)
+
+
 # --- Estimación de sesiones anteriores al muestreo (E1.7) --------------------------------
 
 
@@ -235,7 +351,8 @@ def precios(conn: psycopg.Connection) -> dict[datetime, tuple]:
 def test_coste_por_tramo_en_numeric(conn: psycopg.Connection, limpio: None) -> None:
     mercado(conn, DIA)
     ini = datetime(2026, 11, 5, 9, 58, 20, tzinfo=UTC)
-    muestras = serie(ini, ini + timedelta(hours=2), lambda i: D(4100) + D(i % 5) * D("33.3"))
+    # Sin carga hasta las 10:18:20: la casa tiene coste en los tramos de las 9:45 y las 10:00.
+    muestras = serie(ini, ini + timedelta(hours=2), lambda i: D(0) if i <= 20 else D(4100) + D(i % 5) * D("33.3"))
     insertar_muestras(conn, muestras)
     energia = energia_por_tramo(muestras)
     precio = precios(conn)
@@ -243,12 +360,15 @@ def test_coste_por_tramo_en_numeric(conn: psycopg.Connection, limpio: None) -> N
         "SELECT inicio, consumidor, energia_wh_bruta, factor, factor_origen, energia_kwh, coste_eur, periodo,"
         " coste_pvpc_eur, origen_energia, incompleto, ssaa_estimado FROM v_coste_tramo"
         " WHERE contrato = 'vivienda' AND fuente = %s ORDER BY inicio, consumidor", (FUENTE,)).fetchall()
-    assert len(filas) == 2 * len(energia)
+    assert len(filas) == len(energia) + sum(e.casa_wh is not None for e in energia.values())
+    assert {f[0] for f in filas if f[1] == "casa"} == {ini.replace(minute=45, second=0), ini.replace(minute=0,
+                                                       hour=10, second=0)}
     with localcontext() as ctx:
         ctx.prec = 80
         for inicio, consumidor, bruta, factor, f_origen, kwh, coste, periodo, pvpc, origen, incompleto, ssaa_est in filas:
             e = energia[inicio]
             esperado_wh = e.coche_wh if consumidor == "coche" else e.casa_wh
+            assert esperado_wh is not None
             esperado_factor = D("0.96") if consumidor == "coche" else D(1)
             assert cerca(bruta, esperado_wh)
             assert factor == esperado_factor
@@ -423,6 +543,7 @@ def test_estado_y_huecos_del_dia(conn: psycopg.Connection, limpio: None) -> None
     assert "hace 120 s" in lineas[1]
     assert lineas[2].startswith("Sesiones guardadas: 1;")
     assert lineas[3] == "Huecos de hoy: 1"
+    assert lineas[-1].startswith("Energía por tramo (últimos 2 días):") and "coinciden" in lineas[-1]
     cliente.caido = True
     assert "NO alcanzable" in muestreo.estado(conn, cliente, ahora)[0]  # type: ignore[arg-type]
     assert "VIARIS_URL no definida" in muestreo.estado(conn, None, ahora)[0]
@@ -463,11 +584,13 @@ def test_consultas_de_la_fila_coche(conn: psycopg.Connection, limpio: None, titu
         assert [(f[1] is None, f[2] is None) for f in filas] == [(True, False), (False, True)], filas
         assert cerca(filas[0][3], D("8.64"), "1e-6") and cerca(filas[1][3], D("8.448"))
         return
+    if titulo == "Estado del cargador":
+        # Cargando: la casa es desconocida (homePower = 0 durante la carga).
+        assert filas == [("Cargando", D(4400), None, 3600)]
+        return
     assert filas and all(v is not None for v in filas[0]), filas
     if titulo == "Gasto del coche":
         hoy_kwh, mes_kwh, mes_estimado = filas[0][1], filas[0][5], filas[0][6]
         assert hoy_kwh > 0 and cerca(mes_estimado, D("8.64"), "1e-6") and mes_kwh > hoy_kwh
     if titulo == "Sesiones recientes":
         assert [f[5] for f in filas] == ["Medida", "Estimada"]
-    if titulo == "Estado del cargador":
-        assert filas[0] == ("Cargando", D(4400), D("312.5"), 3600)

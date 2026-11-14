@@ -1,4 +1,4 @@
-"""Referencia en Python de la energía por tramo y del coste (db/migrations/0011_*.sql).
+"""Referencia en Python de la energía por tramo y del coste (migraciones 0011 y 0013).
 
 El servicio calcula en SQL; este módulo replica la misma aritmética con
 Decimal para validar las vistas en los tests.
@@ -40,14 +40,17 @@ class EnergiaTramo:
     casa_ws: Decimal = Decimal(0)
     total_ws: Decimal = Decimal(0)
     cubierto_s: Decimal = Decimal(0)
+    # Alguna muestra del tramo con carga (evse_w > 0): la casa es desconocida.
+    con_carga: bool = False
 
     @property
     def coche_wh(self) -> Decimal:
         return self.coche_ws / SEG_HORA
 
     @property
-    def casa_wh(self) -> Decimal:
-        return self.casa_ws / SEG_HORA
+    def casa_wh(self) -> Decimal | None:
+        # Durante la carga homePower = 0 (verificado el 14/11/2026): no se sabe.
+        return None if self.con_carga else self.casa_ws / SEG_HORA
 
     @property
     def total_wh(self) -> Decimal:
@@ -86,6 +89,7 @@ def energia_por_tramo(muestras: Iterable[Muestra]) -> dict[datetime, EnergiaTram
             e.casa_ws += m.home_w * s
             e.total_ws += m.total_w * s
             e.cubierto_s += s
+            e.con_carga = e.con_carga or m.evse_w > 0
     return dict(tramos)
 
 

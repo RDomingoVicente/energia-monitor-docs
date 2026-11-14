@@ -71,7 +71,11 @@ sin aclarar.
 `evsePower`: `homePower` se calcula como `max(0, totalPower − evsePower)`.
 
 - La casa no es medible mientras carga el coche: en esos tramos su consumo es
-  desconocido (no 0). Sigue marcada como no verificada.
+  desconocido (no 0). Sigue marcada como no verificada. Desde la migración
+  0013, `casa_wh` es NULL en los tramos con alguna muestra con `evsePower` >
+  0 (sin carga, `evsePower` es exactamente 0), y el panel "Estado del
+  cargador" deja vacía la potencia de la casa mientras carga. No se calcula
+  como `totalPower − evsePower`: saldría negativa.
 - El medidor del cargador (`evsePower`) y la pinza (`totalPower`) no cuadran
   entre sí. Pendiente de calibrar con la curva horaria de i-DE.
 

@@ -1681,7 +1681,7 @@
       "id": 21,
       "type": "stat",
       "title": "Estado del cargador",
-      "description": "Última muestra del cargador. Estado del conector según la interfaz del cargador (4 verificado; el resto, del código). La potencia de la casa está sin verificar hasta comprobar que totalPower = evsePower + homePower durante una carga.",
+      "description": "Última muestra del cargador. Estado del conector según la interfaz del cargador (1, 4 y 6 verificados el 14/11/2026; el resto, del código). La potencia de la casa está sin verificar y se muestra vacía mientras carga el coche: durante la carga homePower = 0 (homePower = max(0, total − evse)), así que la casa es desconocida.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
@@ -1702,7 +1702,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  CASE\n    WHEN estado IN (1, 2) THEN 'Libre'\n    WHEN estado IN (3, 4) THEN 'Conectado'\n    WHEN estado IN (5, 6) THEN 'Cargando'\n    WHEN estado = 7 THEN 'Pausado'\n    WHEN estado = 8 THEN 'Carga finalizada'\n    WHEN estado = 32 THEN 'Inoperativo'\n    WHEN estado IS NULL THEN 'Sin lectura'\n    ELSE 'Otro (' || estado || ')'\n  END AS \"Conector\",\n  evse_w AS \"Coche (W)\",\n  home_w AS \"Casa, sin verificar (W)\",\n  extract(epoch FROM now() - instante)::integer AS \"Última muestra (s)\"\nFROM cargador_muestra\nORDER BY instante DESC\nLIMIT 1"
+          "rawSql": "SELECT\n  CASE\n    WHEN estado IN (1, 2) THEN 'Libre'\n    WHEN estado IN (3, 4) THEN 'Conectado'\n    WHEN estado IN (5, 6) THEN 'Cargando'\n    WHEN estado = 7 THEN 'Pausado'\n    WHEN estado = 8 THEN 'Carga finalizada'\n    WHEN estado = 32 THEN 'Inoperativo'\n    WHEN estado IS NULL THEN 'Sin lectura'\n    ELSE 'Otro (' || estado || ')'\n  END AS \"Conector\",\n  evse_w AS \"Coche (W)\",\n  -- Durante la carga homePower = 0: la casa es desconocida, no 0.\n  CASE WHEN evse_w > 0 THEN NULL ELSE home_w END AS \"Casa, sin verificar (W)\",\n  extract(epoch FROM now() - instante)::integer AS \"Última muestra (s)\"\nFROM cargador_muestra\nORDER BY instante DESC\nLIMIT 1"
         }
       ],
       "fieldConfig": {
@@ -2139,5 +2139,5 @@
       }
     }
   ],
-  "version": 7
+  "version": 8
 }

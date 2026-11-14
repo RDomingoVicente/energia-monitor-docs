@@ -137,3 +137,11 @@ def test_sin_viaris_url_queda_en_espera_hasta_la_parada() -> None:
         raise AssertionError("sin VIARIS_URL no se conecta a la base de datos")
 
     muestreo.ejecutar(None, stop, conectar=conectar)
+
+
+def test_recalcular_con_rango_invertido(monkeypatch: pytest.MonkeyPatch) -> None:
+    from energia_monitor import __main__ as cli
+    from energia_monitor import db
+
+    monkeypatch.setattr(db, "conectar", lambda **_: pytest.fail("no debe conectar"))
+    assert cli.main(["cargador", "recalcular", "--desde", "2026-11-05", "--hasta", "2026-11-04"]) == 2

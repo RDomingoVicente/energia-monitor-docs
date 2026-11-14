@@ -14,6 +14,7 @@ import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import psycopg
 
@@ -27,6 +28,10 @@ INTERVALO_S = 60
 # Más de este hueco entre muestras no se rellena: la muestra lleva intervalo NULL.
 INTERVALO_MAX_S = 180
 INTERVALO_HISTORICO = timedelta(minutes=15)
+# `cargador estado` compara energia_tramo con las muestras en este periodo.
+DIAS_COHERENCIA = timedelta(days=2)
+# Prefijo de las líneas de `cargador estado` que hacen devolver 1 al comando.
+AVISO = "AVISO:"
 
 
 def intervalo_desde(anterior: datetime | None, instante: datetime) -> int | None:
@@ -49,14 +54,59 @@ def ultima_muestra(conn: psycopg.Connection) -> datetime | None:
 
 def guardar_muestra(conn: psycopg.Connection, instante: datetime, modulador: Modulador,
                     estado: int | None) -> int | None:
-    """Inserta la muestra (idempotente por instante) y devuelve su intervalo."""
-    intervalo = intervalo_desde(ultima_muestra(conn), instante)
-    conn.execute(
-        "INSERT INTO cargador_muestra (instante, intervalo_s, evse_w, home_w, total_w, estado)"
-        " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (instante) DO NOTHING",
-        (instante, intervalo, modulador.evse_w, modulador.home_w, modulador.total_w, estado),
-    )
+    """Inserta la muestra (idempotente por instante) y devuelve su intervalo.
+
+    En la misma transacción recalcula energia_tramo en los tramos que cubre
+    la muestra, [instante - intervalo, instante): uno, o dos si cruza el
+    cuarto de hora.
+    """
+    with conn.transaction():
+        intervalo = intervalo_desde(ultima_muestra(conn), instante)
+        conn.execute(
+            "INSERT INTO cargador_muestra (instante, intervalo_s, evse_w, home_w, total_w, estado)"
+            " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (instante) DO NOTHING",
+            (instante, intervalo, modulador.evse_w, modulador.home_w, modulador.total_w, estado),
+        )
+        if intervalo is not None:
+            recalcular_tramos(conn, instante - timedelta(seconds=intervalo), instante)
     return intervalo
+
+
+def recalcular_tramos(conn: psycopg.Connection, desde: datetime, hasta: datetime) -> int:
+    """Recalcula desde las muestras los tramos que se solapan con [desde, hasta).
+
+    Devuelve cuántos tramos con energía quedan en el rango.
+    """
+    fila = conn.execute("SELECT recalcular_energia_tramo(%s, %s)", (desde, hasta)).fetchone()
+    return int(fila[0]) if fila else 0
+
+
+@dataclass(frozen=True)
+class Coherencia:
+    tramos: int
+    distintos: int
+
+
+SQL_COHERENCIA = """
+WITH r AS (
+    SELECT date_bin('15 minutes', %(desde)s::timestamptz, TIMESTAMPTZ '2000-01-01 00:00:00+00') AS d,
+           %(hasta)s::timestamptz AS h
+),
+guardado AS (SELECT e.* FROM energia_tramo e, r WHERE e.inicio >= r.d AND e.inicio < r.h),
+calculado AS (SELECT c.* FROM r, energia_tramo_calculada(r.d, r.h) c)
+SELECT (SELECT count(*) FROM calculado),
+       (SELECT count(*) FROM (
+            (SELECT * FROM guardado EXCEPT ALL SELECT * FROM calculado)
+            UNION ALL
+            (SELECT * FROM calculado EXCEPT ALL SELECT * FROM guardado)) x)
+"""
+
+
+def coherencia_tramos(conn: psycopg.Connection, desde: datetime, hasta: datetime) -> Coherencia:
+    """Compara energia_tramo con el cálculo desde cargador_muestra (tramos con inicio en el rango)."""
+    fila = conn.execute(SQL_COHERENCIA, {"desde": desde, "hasta": hasta}).fetchone()
+    assert fila is not None
+    return Coherencia(int(fila[0]), int(fila[1]))
 
 
 def registrar_estado(conn: psycopg.Connection, instante: datetime, estado: EstadoConector,
@@ -239,7 +289,7 @@ def estado(conn: psycopg.Connection, cliente: ClienteViaris | None, ahora: datet
     else:
         try:
             m = cliente.modulador()
-            lineas.append(f"Cargador {cliente.base}: alcanzable (coche {m.evse_w} W, casa {m.home_w} W,"
+            lineas.append(f"Cargador {cliente.base}: alcanzable (coche {m.evse_w} W, {_casa(m.evse_w, m.home_w)},"
                           f" total {m.total_w} W)")
         except ErrorCargador as e:
             lineas.append(f"Cargador {cliente.base}: NO alcanzable ({e})")
@@ -254,7 +304,7 @@ def estado(conn: psycopg.Connection, cliente: ClienteViaris | None, ahora: datet
         instante, intervalo, evse, home, total, est = fila
         edad = round((ahora - instante).total_seconds())
         lineas.append(f"Última muestra: {instante.astimezone(MADRID):%Y-%m-%d %H:%M:%S} (hace {edad} s),"
-                      f" coche {evse} W, casa {home} W, total {total} W, estado {est}")
+                      f" coche {evse} W, {_casa(evse, home)}, total {total} W, estado {est}")
 
     n, ultima_ini, ultima_fin, ultima_wh = conn.execute(
         "SELECT count(*), max(inicio), (array_agg(fin ORDER BY inicio DESC))[1],"
@@ -275,4 +325,22 @@ def estado(conn: psycopg.Connection, cliente: ClienteViaris | None, ahora: datet
                           f" ({minutos:.1f} min)")
     else:
         lineas.append("Huecos de hoy: ninguno")
+
+    c = coherencia_tramos(conn, ahora - DIAS_COHERENCIA, ahora)
+    if c.distintos:
+        desde = (ahora - DIAS_COHERENCIA).astimezone(MADRID).date()
+        log.warning("energia_tramo no coincide con las muestras en %d tramo(s) de los últimos %d días",
+                    c.distintos, DIAS_COHERENCIA.days)
+        lineas.append(f"{AVISO} energía por tramo: {c.distintos} tramo(s) de los últimos {DIAS_COHERENCIA.days}"
+                      f" días no coinciden con las muestras; corregir con `cargador recalcular --desde {desde}`")
+    else:
+        lineas.append(f"Energía por tramo (últimos {DIAS_COHERENCIA.days} días): {c.tramos} tramo(s),"
+                      " coinciden con las muestras")
     return lineas
+
+
+def _casa(evse_w: Decimal, home_w: Decimal) -> str:
+    # Durante la carga homePower es 0 (verificado el 14/11/2026): no es la casa.
+    if evse_w > 0:
+        return "casa desconocida (cargando)"
+    return f"casa {home_w} W"

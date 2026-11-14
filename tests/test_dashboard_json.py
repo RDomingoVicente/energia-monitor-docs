@@ -68,6 +68,9 @@ def test_casa_marcada_sin_verificar() -> None:
     panel = PANELES["Estado del cargador"]
     assert "Casa, sin verificar" in panel["targets"][0]["rawSql"]
     assert "sin verificar" in panel["description"]
+    # Durante la carga homePower = 0: la casa sale vacía, no 0.
+    assert "CASE WHEN evse_w > 0 THEN NULL ELSE home_w END" in panel["targets"][0]["rawSql"]
+    assert "total_w - evse_w" not in panel["targets"][0]["rawSql"]
 
 
 @pytest.mark.parametrize("titulo", ["Gasto del coche", "Gasto en el rango", "Gasto diario del coche (30 días)",

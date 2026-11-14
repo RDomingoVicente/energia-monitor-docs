@@ -28,6 +28,7 @@ DIA_CAMBIO_HORA = date(2026, 10, 25)  # 25 horas en Madrid
 def limpiar(conn: psycopg.Connection) -> None:
     conn.execute("DELETE FROM precio_mercado WHERE fuente = %s", (FUENTE,))
     conn.execute("DELETE FROM cargador_muestra")
+    conn.execute("DELETE FROM energia_tramo")
     conn.execute("DELETE FROM cargador_sesion")
     conn.execute("DELETE FROM serie_esios WHERE inicio >= '2026-10-23Z' AND inicio < '2026-10-26Z'")
     db.refrescar_precio_final(conn)
@@ -75,6 +76,7 @@ def muestras_cada_minuto(conn: psycopg.Connection, desde: datetime, hasta: datet
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany("INSERT INTO cargador_muestra (instante, intervalo_s, evse_w, home_w, total_w)"
                         " VALUES (%s, %s, %s, %s, %s)", filas)
+        muestreo.recalcular_tramos(conn, desde, hasta)
 
 
 def sesion(conn: psycopg.Connection, inicio: datetime, fin: datetime, wh: str) -> None:
