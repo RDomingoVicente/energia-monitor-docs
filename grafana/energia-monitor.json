@@ -1796,7 +1796,7 @@
       "id": 22,
       "type": "timeseries",
       "title": "Gasto diario del coche (30 días)",
-      "description": "Euros por día (con IEE e IVA), medidos y estimados apilados, y kWh corregidos en el eje derecho.",
+      "description": "Euros por día (con IEE e IVA), medidos y estimados apilados, y kWh corregidos en el eje derecho. Eje fijo de 30 días (como \"Precio final: media diaria\"), sea cual sea el rango del selector.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
@@ -1926,7 +1926,8 @@
           "mode": "multi",
           "sort": "none"
         }
-      }
+      },
+      "timeFrom": "30d"
     },
     {
       "id": 23,
@@ -2139,5 +2140,5 @@
       }
     }
   ],
-  "version": 8
+  "version": 9
 }

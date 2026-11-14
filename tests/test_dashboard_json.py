@@ -89,3 +89,17 @@ def test_paneles_pvpc_en_una_sola_base(panel_id: int) -> None:
     assert "sin_impuestos" not in sql
     assert re.findall(r"\b(\w+)_eur_kwh\b", sql) and set(re.findall(r"\b(\w+)_eur_kwh\b", sql)) <= {
         "precio_final", "pvpc_final", "diferencia"}
+
+
+@pytest.mark.parametrize("panel", [p for p in DASHBOARD["panels"] if p["type"] == "timeseries"],
+                         ids=lambda p: str(p["id"]))
+def test_grafica_temporal_sin_filtro_de_rango_fija_su_eje(panel: dict) -> None:
+    # El eje de una gráfica temporal es el rango del selector (hoy, por defecto): si la consulta
+    # calcula su propio periodo, el panel debe fijar el suyo o los días anteriores quedan fuera.
+    sql = " ".join(t.get("rawSql", "") for t in panel["targets"])
+    if "$__timeFilter" not in sql:
+        assert panel.get("timeFrom"), panel["title"]
+
+
+def test_gasto_diario_con_eje_de_30_dias() -> None:
+    assert PANELES["Gasto diario del coche (30 días)"]["timeFrom"] == "30d"

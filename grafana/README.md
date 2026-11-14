@@ -106,5 +106,11 @@ precios o series de ESIOS no se ve hasta ejecutar `refrescar`
 (docs/parametros.md). Los paneles de la fila de precios siguen leyendo
 `v_precio_final` en directo.
 
+Las gráficas temporales dibujan el rango del selector (hoy, por defecto).
+Las que muestran un periodo fijo ("Precio final: media diaria", "Diferencia
+diaria con el PVPC", "Gasto diario del coche (30 días)") lo fijan con
+"Relative time" = 30d (`timeFrom` en el JSON); sin él, los días anteriores
+quedan fuera del eje aunque la consulta los devuelva.
+
 El JSON está en el repositorio: los cambios hechos en la interfaz de Grafana
 se exportan (Share → Export) y se guardan aquí.
