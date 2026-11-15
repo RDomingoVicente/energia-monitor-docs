@@ -123,9 +123,11 @@ def _como(d: AyudaDatos) -> Html:
     flecha = Html('<svg aria-hidden="true" class="flecha" width="28" height="28" viewBox="0 0 24 24" fill="none" '
                   'stroke="#58A6FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14">'
                   '</path><path d="m12 5 7 7-7 7"></path></svg>')
-    return h('<div class="relleno"><div class="diagrama"><div class="cajas">{}</div>{}<div class="cajas">{}</div></div>'
-             '<p class="sub">Ejemplo con los valores vigentes:</p>{}</div>',
-             unir(caja(*c) for c in cajas_e), flecha, unir(caja(*c) for c in cajas_s), _ejemplo(d))
+    modelo = Html('<div class="pn caja modelo"><p class="m">Modelo</p><p class="k">recalcular_bateria: trayectos, '
+                  'reconciliación, mediana, P75, eficiencia de carga</p></div>')
+    return h('<div class="relleno"><div class="diagrama"><div class="cajas">{}</div>{}{}{}<div class="cajas">{}</div>'
+             '</div><p class="sub">Ejemplo con los valores vigentes:</p>{}</div>',
+             unir(caja(*c) for c in cajas_e), flecha, modelo, flecha, unir(caja(*c) for c in cajas_s), _ejemplo(d))
 
 
 def pantalla(d: AyudaDatos, q: str = "") -> Html:

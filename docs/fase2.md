@@ -238,7 +238,11 @@ Entrega:
      ningún elemento sale de su contenedor en 1280×900 ni en 390×844 en 15
      vistas, sin errores de consola ni recursos bloqueados por la CSP.
      Capturas junto a las maquetas con el stage `capturas` del mismo
-     Dockerfile. Pendiente: desplegar en el NAS y probar desde el móvil.
+     Dockerfile. Desplegada en el NAS el 15/11/2026.
+   - v0.5.6: Ayuda sin duplicar en escritorio (y el bloque Coche/Necesita
+     de Inicio solo en móvil), test de visibilidad por tamaño, logo y
+     favicon (formulario-maquetas.md, 3) y caja «Modelo» en el diagrama de
+     la Ayuda. Pendiente: desplegar en el NAS.
 4. Dashboard de batería (E2.10, segunda parte): pendiente.
 
 ### Objetivo

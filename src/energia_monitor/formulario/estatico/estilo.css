@@ -286,7 +286,10 @@ select.inp { font-family: var(--sans); }
 .buscar { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
 .cabecera-ayuda h1 { margin: 0; font-size: 22px; }
 .paneles, .detalles { display: flex; flex-direction: column; gap: 16px; }
-.diagrama { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); gap: 12px; align-items: center; }
+.diagrama { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) 28px minmax(0, 1.2fr);
+  gap: 12px; align-items: center; }
+/* Modelo: toda la altura de la columna en escritorio, borde azul como en la maqueta 06. */
+.diagrama .modelo { align-self: stretch; border-color: var(--acento-btn); }
 .cajas { display: flex; flex-direction: column; gap: 8px; }
 .caja { padding: 10px 12px; } .caja p { margin: 0; } .caja .m { font-size: 13px; color: var(--texto); }
 .ejemplo { margin-top: 6px; }
