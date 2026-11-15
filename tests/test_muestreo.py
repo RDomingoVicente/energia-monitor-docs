@@ -58,6 +58,9 @@ def registro(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
                         lambda conn, instante, e: llamadas.append(("estado", instante, e.estado)))
     monkeypatch.setattr(muestreo, "guardar_sesiones",
                         lambda conn, sesiones: llamadas.append(("sesiones", len(sesiones))) or (0, 0))
+    monkeypatch.setattr(muestreo, "hay_sesiones_pendientes", lambda conn: False)
+    monkeypatch.setattr(muestreo.bateria_servicio, "recalcular_sin_fallar",
+                        lambda conn, motivo: llamadas.append(("bateria", motivo)))
     return llamadas
 
 
@@ -145,3 +148,46 @@ def test_recalcular_con_rango_invertido(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(db, "conectar", lambda **_: pytest.fail("no debe conectar"))
     assert cli.main(["cargador", "recalcular", "--desde", "2026-11-05", "--hasta", "2026-11-04"]) == 2
+
+
+# --- Disparadores del recálculo de la batería (E2.1, E2.4) ----------------------------------
+
+
+def test_cambio_de_estado_recalcula_la_bateria(registro: list[tuple], monkeypatch: pytest.MonkeyPatch) -> None:
+    _, reloj = reloj_desde(T0)
+    monkeypatch.setattr(muestreo, "registrar_estado",
+                        lambda conn, instante, e: registro.append(("estado", instante, e.estado)) or True)
+    Muestreador(ClienteFalso(), reloj).ciclo(conn=None)  # type: ignore[arg-type]
+    assert ("bateria", "cambio de estado del conector") in registro
+
+
+def test_sin_cambio_de_estado_no_recalcula(registro: list[tuple]) -> None:
+    _, reloj = reloj_desde(T0)
+    Muestreador(ClienteFalso(), reloj).ciclo(conn=None)  # type: ignore[arg-type]
+    assert not [r for r in registro if r[0] == "bateria"]
+
+
+@pytest.mark.parametrize(("nuevas", "pendientes", "motivo"), [
+    ((1, 0), False, "sesiones nuevas o modificadas"),
+    ((0, 1), False, "sesiones nuevas o modificadas"),
+    ((0, 0), True, "sesión pendiente de clasificar"),
+    ((0, 0), False, None),
+])
+def test_historico_recalcula_con_sesiones_nuevas_o_pendientes(
+        registro: list[tuple], monkeypatch: pytest.MonkeyPatch, nuevas: tuple[int, int], pendientes: bool,
+        motivo: str | None) -> None:
+    _, reloj = reloj_desde(T0)
+    monkeypatch.setattr(muestreo, "guardar_sesiones", lambda conn, sesiones: nuevas)
+    monkeypatch.setattr(muestreo, "hay_sesiones_pendientes", lambda conn: pendientes)
+    Muestreador(ClienteFalso(), reloj).leer_historico(conn=None, instante=T0)  # type: ignore[arg-type]
+    assert [r[1] for r in registro if r[0] == "bateria"] == ([motivo] if motivo else [])
+
+
+def test_fallo_del_recalculo_no_detiene_el_muestreo(caplog: pytest.LogCaptureFixture) -> None:
+    class ConexionRota:
+        def execute(self, *args: object) -> None:
+            raise RuntimeError("base de datos caída")
+
+    with caplog.at_level(logging.ERROR):
+        muestreo.bateria_servicio.recalcular_sin_fallar(ConexionRota(), "prueba")  # type: ignore[arg-type]
+    assert "fallo al recalcular la batería (prueba)" in caplog.text

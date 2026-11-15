@@ -193,6 +193,17 @@ descarga de precios.
 Etapa actual, especificada el 14/11/2026. Tarea y orden de entrega:
 [tareas/etapa-2-bateria.md](tareas/etapa-2-bateria.md).
 
+Entrega:
+
+1. Dashboards separados por tema: hecho (14/11/2026).
+2. Modelo y cálculo (E2.1 a E2.8 y E2.11): hecho (v0.5.0, migración 0014).
+   Verificado con tests (secuencias sintéticas, historias aleatorias con el SQL
+   frente a la referencia en Python y la secuencia real del 13 al 14/11).
+   Pendiente de verificar en el NAS: una lectura real, una desconexión y
+   reconexión reales y su reconciliación con la lectura siguiente.
+3. Formulario (E2.9): pendiente de las maquetas.
+4. Dashboard de batería (E2.10, segunda parte): pendiente.
+
 ### Objetivo
 
 Saber en todo momento el nivel de batería estimado del coche y la energía
@@ -302,6 +313,9 @@ A1 + energía de las sesiones × factor − A2.
   trayectos quedan con consumo real y origen `reconciliado`.
 - Si el resultado es negativo o supera la capacidad, no se aplica: se marca
   el intervalo como incoherente y se muestra en la página.
+- Un intervalo sin trayectos no cortos no tiene nada que repartir: con
+  carga, la diferencia es error del factor (E2.6), no incoherencia; solo es
+  incoherente si supera la capacidad o si, sin ninguna carga, el nivel sube.
 - La estadística de E2.4 y E2.7 usa solo trayectos con consumo real.
 
 **E2.6 Calibración del factor.** En un intervalo entre dos valores absolutos
@@ -309,7 +323,14 @@ sin ningún trayecto (tampoco cortos), sin huecos de muestreo y con al menos
 `energia_min_calibracion_kwh` (5) cargados, factor observado = (A2 − A1) / kWh
 del contador del cargador. Se guardan las observaciones y se muestra el
 factor sugerido: la mediana de las últimas `observaciones_calibracion` (5).
-**No se aplica solo**: el usuario lo registra como nuevo valor del parámetro.
+Una observación fuera de (0, 1] no se guarda (el factor no puede ser mayor
+que 1). **No se aplica solo**: el usuario lo registra como nuevo valor del
+parámetro.
+
+Hueco de muestreo (E2.6 y avisos de E2.7): tramo sin muestras de más de
+`hueco_muestreo_aviso_s`. Un hueco de más de 180 s deja la muestra siguiente
+sin intervalo (`intervalo_s` NULL, migración 0010); el cálculo mira esas
+muestras y los dos extremos del intervalo.
 
 **E2.7 Previsión.**
 
@@ -421,8 +442,18 @@ regulado, estimado, usuario o ficha_tecnica. Los booleanos se guardan como
   `v_bateria_*`, pero no ejecutar el recálculo.
 
 **E2.11 CLI.** `bateria estado`, `bateria lectura --pct N [--instante ...]`,
-`bateria recalcular [--desde ...]` y `parametro registrar|listar --ambito
-bateria`.
+`bateria recalcular` y `parametro registrar|listar --ambito bateria`
+(docs/parametros.md).
+
+- `bateria recalcular` no tiene `--desde`: el recálculo siempre rehace todo
+  desde las tablas de origen, porque una lectura dentro de una sesión o de un
+  trayecto cambia también el intervalo anterior. Con un año de datos
+  sintéticos tarda unos 0,6 s en local.
+- `bateria lectura`: hora de Madrid; una hora que no existe (cambio de marzo)
+  se rechaza, una ambigua (cambio de octubre) se toma como la primera, y no se
+  admiten lecturas futuras ni dos lecturas activas en el mismo instante.
+- Los parámetros de batería tienen vigencia desde el 1/1/2025, antes de
+  cualquier sesión del cargador.
 
 ### Criterios de aceptación
 

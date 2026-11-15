@@ -18,7 +18,7 @@ from decimal import Decimal
 
 import psycopg
 
-from energia_monitor import db
+from energia_monitor import bateria_servicio, db
 from energia_monitor.tiempo import MADRID, limites_dia_utc
 from energia_monitor.viaris import CONECTOR, ClienteViaris, ErrorCargador, EstadoConector, Modulador, Sesion
 
@@ -156,6 +156,11 @@ def guardar_sesiones(conn: psycopg.Connection, sesiones: Iterable[Sesion]) -> tu
     return nuevas, modificadas
 
 
+def hay_sesiones_pendientes(conn: psycopg.Connection) -> bool:
+    fila = conn.execute("SELECT EXISTS (SELECT 1 FROM bateria_sesion WHERE cierre = 'pendiente')").fetchone()
+    return bool(fila and fila[0])
+
+
 # --- Ciclo y bucle ---------------------------------------------------------------
 
 
@@ -205,8 +210,9 @@ class Muestreador:
             self._aviso_modulador.fallo(e)
         else:
             guardar_muestra(conn, instante, modulador, estado.estado if estado else None)
-        if estado is not None:
-            registrar_estado(conn, instante, estado)
+        if estado is not None and registrar_estado(conn, instante, estado):
+            # Un cambio de estado puede abrir o cerrar un trayecto (E2.4).
+            bateria_servicio.recalcular_sin_fallar(conn, "cambio de estado del conector")
         if self.ultimo_historico is None or instante - self.ultimo_historico >= INTERVALO_HISTORICO:
             self.leer_historico(conn, instante)
 
@@ -222,6 +228,10 @@ class Muestreador:
         if nuevas or modificadas:
             log.info("histórico del cargador: %d sesión(es) nuevas y %d modificadas de %d leídas",
                      nuevas, modificadas, len(sesiones))
+            bateria_servicio.recalcular_sin_fallar(conn, "sesiones nuevas o modificadas")
+        elif hay_sesiones_pendientes(conn):
+            # Sesión recién terminada: la regla de carga completa (E2.3) espera 180 s.
+            bateria_servicio.recalcular_sin_fallar(conn, "sesión pendiente de clasificar")
 
 
 def ejecutar(
@@ -238,6 +248,7 @@ def ejecutar(
     with conectar() as conn:
         aplicadas = db.migrar(conn)
         log.info("migraciones aplicadas: %s", ", ".join(aplicadas) if aplicadas else "ninguna pendiente")
+        bateria_servicio.recalcular_sin_fallar(conn, "arranque del muestreo")
     log.info("muestreo del cargador en %s cada %d s", cliente.base, INTERVALO_S)
     muestreador = Muestreador(cliente, reloj)
     while not stop.is_set():

@@ -1,4 +1,4 @@
-"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | refrescar | parametro | esios | cargador].
+"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | refrescar | parametro | esios | cargador | bateria].
 
 - ejecutar (por defecto): migraciones, descarga de los días que falten desde
   CARGA_INICIAL_DESDE hasta mañana y actualización diaria planificada.
@@ -25,6 +25,14 @@
   borrar muestras por SQL).
 - parametro ... --ambito cargador: parámetros del cargador (factor del
   contador, potencia de la estimación).
+- parametro ... --ambito bateria: parámetros de la batería (capacidad,
+  reserva, factor...); registrar recalcula el nivel.
+- bateria estado: nivel estimado y su antigüedad, coche, próxima salida,
+  energía necesaria y avisos; devuelve 1 si hay avisos.
+- bateria lectura --pct N [--instante "AAAA-MM-DD HH:MM"] [--nota TEXTO]:
+  lectura del nivel (hora de Madrid; por defecto, ahora) y recálculo.
+- bateria recalcular: rehace el nivel, los trayectos y la reconciliación
+  (tras cambiar por SQL lecturas, excepciones o datos del cargador).
 
 recargar, esios recargar, esios estimar y parametro registrar (de contrato)
 refrescan mv_precio_final al terminar.
@@ -42,7 +50,17 @@ from decimal import Decimal
 
 import psycopg
 
-from energia_monitor import __version__, colector, db, esios, estimacion, muestreo, parametros, planificador
+from energia_monitor import (
+    __version__,
+    bateria_servicio,
+    colector,
+    db,
+    esios,
+    estimacion,
+    muestreo,
+    parametros,
+    planificador,
+)
 from energia_monitor.config import Config
 from energia_monitor.errores import ErrorAutenticacion
 from energia_monitor.sources import crear_cliente_esios, crear_fuente
@@ -66,18 +84,19 @@ def _parser() -> argparse.ArgumentParser:
     parametro = sub.add_parser("parametro", help="parámetros de contrato con vigencia")
     sub_param = parametro.add_subparsers(dest="accion", required=True)
     registrar = sub_param.add_parser("registrar", help="nuevo valor desde una fecha (cierra el anterior)")
-    registrar.add_argument("--ambito", choices=("contrato", "cargador"), default="contrato")
+    registrar.add_argument("--ambito", choices=("contrato", "cargador", "bateria"), default="contrato")
     registrar.add_argument("--contrato", default="vivienda")
     registrar.add_argument("--clave", required=True)
     registrar.add_argument("--periodo", default="*", help="'*' o P1..P6 según la clave")
     registrar.add_argument("--desde", type=date.fromisoformat, required=True)
     registrar.add_argument("--valor", type=Decimal, required=True, help="en la unidad de la clave")
-    registrar.add_argument("--origen", required=True, choices=parametros.ORIGENES,
-                           help="contrato (pactado), regulado (norma publicada) o estimado")
+    registrar.add_argument("--origen", required=True, choices=parametros.ORIGENES_BATERIA,
+                           help="contrato (pactado), regulado (norma publicada) o estimado; en la batería,"
+                                " también usuario y ficha_tecnica")
     registrar.add_argument("--fuente", required=True)
     registrar.add_argument("--nota")
     listar = sub_param.add_parser("listar", help="parámetros vigentes en una fecha")
-    listar.add_argument("--ambito", choices=("contrato", "cargador"), default="contrato")
+    listar.add_argument("--ambito", choices=("contrato", "cargador", "bateria"), default="contrato")
     listar.add_argument("--contrato", default="vivienda")
     listar.add_argument("--fecha", type=date.fromisoformat, help="por defecto, hoy")
 
@@ -96,6 +115,15 @@ def _parser() -> argparse.ArgumentParser:
     recalcular = sub_cargador.add_parser("recalcular", help="recalcula energia_tramo desde las muestras")
     recalcular.add_argument("--desde", type=date.fromisoformat, required=True)
     recalcular.add_argument("--hasta", type=date.fromisoformat, help="por defecto, hoy")
+
+    bateria = sub.add_parser("bateria", help="nivel de batería estimado y previsión")
+    sub_bateria = bateria.add_subparsers(dest="accion", required=True)
+    sub_bateria.add_parser("estado", help="nivel, coche, próxima salida, energía necesaria y avisos")
+    lectura = sub_bateria.add_parser("lectura", help="registra una lectura del nivel y recalcula")
+    lectura.add_argument("--pct", type=Decimal, required=True, help="porcentaje de 0 a 100")
+    lectura.add_argument("--instante", help="AAAA-MM-DD HH:MM, hora de Madrid (por defecto, ahora)")
+    lectura.add_argument("--nota")
+    sub_bateria.add_parser("recalcular", help="rehace nivel, trayectos y reconciliación")
     return parser
 
 
@@ -125,6 +153,36 @@ def _cargador(args: argparse.Namespace, config: Config) -> int:
     for linea in lineas:
         print(linea)
     return 1 if any(linea.startswith(muestreo.AVISO) for linea in lineas) else 0
+
+
+def _bateria(args: argparse.Namespace) -> int:
+    ahora = datetime.now(UTC)
+    with db.conectar() as conn:
+        if args.accion == "recalcular":
+            n = bateria_servicio.recalcular(conn)
+            print(f"batería recalculada: {n} evento(s)")
+            return 0
+        if args.accion == "lectura":
+            try:
+                if args.instante:
+                    local = bateria_servicio.instante_local(args.instante)
+                    if local.ambigua:
+                        print(f"{args.instante} es ambigua (cambio de hora): se toma la primera, en horario de verano")
+                    instante = local.instante
+                else:
+                    instante = ahora.replace(second=0, microsecond=0)
+                ident = bateria_servicio.registrar_lectura(conn, instante=instante, pct=args.pct, origen="cli",
+                                                           nota=args.nota, ahora=ahora)
+            except bateria_servicio.ErrorLectura as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
+            print(f"lectura {ident} registrada: {args.pct} %")
+        lineas = bateria_servicio.estado(conn, ahora)
+    for linea in lineas:
+        print(linea)
+    if args.accion == "lectura":
+        return 0
+    return 1 if any(linea.startswith(bateria_servicio.AVISO) for linea in lineas) else 0
 
 
 SQL_DEFINICION_SSAA = """
@@ -187,21 +245,30 @@ def _esios(args: argparse.Namespace, config: Config) -> int:
 def _parametro(args: argparse.Namespace) -> int:
     with db.conectar() as conn:
         cargador = args.ambito == "cargador"
+        bateria = args.ambito == "bateria"
         if args.accion == "listar":
             fecha = args.fecha or hoy_madrid()
             if cargador:
                 print(f"Parámetros del cargador vigentes el {fecha}:")
                 filas = parametros.listar_parametros_cargador(conn, fecha)
+            elif bateria:
+                print(f"Parámetros de la batería vigentes el {fecha}:")
+                filas = parametros.listar_parametros_bateria(conn, fecha)
             else:
                 print(f"Parámetros de {args.contrato} vigentes el {fecha}:")
                 filas = parametros.listar_parametros(conn, args.contrato, fecha)
             for clave, periodo, valor, unidad, origen, vigencia, fuente in filas:
                 texto = "sin valor" if valor is None else f"{valor} {unidad}"
-                print(f"  {clave:<19} {periodo:<3} {origen:<9} {texto}  {vigencia}  [{fuente}]")
+                print(f"  {clave:<28} {periodo:<3} {origen:<13} {texto}  {vigencia}  [{fuente}]")
             return 0
         try:
             if cargador:
                 registro = parametros.registrar_parametro_cargador(
+                    conn, clave=args.clave, desde=args.desde, valor=args.valor,
+                    origen=args.origen, fuente=args.fuente, nota=args.nota,
+                )
+            elif bateria:
+                registro = parametros.registrar_parametro_bateria(
                     conn, clave=args.clave, desde=args.desde, valor=args.valor,
                     origen=args.origen, fuente=args.fuente, nota=args.nota,
                 )
@@ -216,8 +283,13 @@ def _parametro(args: argparse.Namespace) -> int:
         if registro.cerrada:
             log.info("vigencia anterior %s cerrada el %s", registro.cerrada, args.desde)
         log.info("registrado %s/%s = %s con vigencia %s", args.clave, args.periodo, args.valor, registro.nueva)
-        # Los parámetros del cargador se leen en directo; los de contrato entran en el precio.
+        # Los parámetros del cargador se leen en directo; los de contrato entran en el precio; los
+        # de la batería, en el nivel y los trayectos guardados.
         if cargador:
+            return 0
+        if bateria:
+            n = bateria_servicio.recalcular(conn)
+            log.info("batería recalculada: %d evento(s)", n)
             return 0
         return 0 if _refrescar(conn) else 1
 
@@ -249,6 +321,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if orden == "cargador":
         return _cargador(args, config)
+
+    if orden == "bateria":
+        return _bateria(args)
 
     if orden == "migrar":
         with db.conectar() as conn:

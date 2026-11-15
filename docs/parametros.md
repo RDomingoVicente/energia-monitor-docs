@@ -157,3 +157,61 @@ Si el cambio debe aplicarse a todo el histórico, basta con poner
 `incluido = false` en la fila vigente (no hay versión que publicar). La vista
 recalcula al momento; la estimación se recalcula en la siguiente ejecución
 del colector o con `python -m energia_monitor esios estimar`.
+
+## Batería (fase 2, etapa 2)
+
+Especificación: docs/fase2.md, "Etapa 2: batería y previsión". El nivel se
+recalcula entero en PostgreSQL (`recalcular_bateria()`). Lo lanzan el
+muestreo (cambio de estado del conector y sesiones nuevas del histórico), una
+lectura y un parámetro nuevo registrados por el CLI.
+
+```sh
+docker compose exec collector python -m energia_monitor bateria estado
+docker compose exec collector python -m energia_monitor bateria lectura --pct 62
+docker compose exec collector python -m energia_monitor bateria lectura --pct 58 --instante "2026-11-15 08:30" --nota "app del coche"
+docker compose exec collector python -m energia_monitor bateria recalcular
+```
+
+- `bateria estado` devuelve 1 si hay avisos (sin lecturas recientes,
+  intervalo incoherente, factor sugerido distinto, hueco de muestreo, sesión
+  dudosa).
+- `bateria lectura` toma la hora de Madrid (por defecto, ahora). Para
+  corregir o anular una lectura hasta que llegue el formulario:
+
+  ```sql
+  UPDATE bateria_lectura SET anulada_en = now(), motivo = 'error al leer' WHERE id = 7;
+  ```
+
+  y después `bateria recalcular`. Las lecturas no se borran.
+
+Parámetros (`bateria_parametro`, mismas reglas que los del cargador; origen
+también `usuario` o `ficha_tecnica`):
+
+```sh
+docker compose exec collector python -m energia_monitor parametro listar --ambito bateria
+docker compose exec collector python -m energia_monitor parametro registrar --ambito bateria \
+  --clave factor_bateria --desde 2026-12-01 --valor 0.88 --origen estimado \
+  --fuente "factor sugerido por bateria estado (5 observaciones)"
+```
+
+Registrar un parámetro de batería recalcula el nivel. Los booleanos van como
+0/1 (`detectar_carga_completa`). Un valor fuera de rango lo rechaza el CHECK
+de la tabla.
+
+Horario y excepciones, por SQL hasta que llegue el formulario (horas
+locales; una excepción activa por fecha; la baja es lógica):
+
+```sql
+-- Lunes a jueves a las 9:00, viernes a las 7:00, sin salida el fin de semana.
+INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES
+    (1, '09:00'), (2, '09:00'), (3, '09:00'), (4, '09:00'), (5, '07:00'), (6, NULL), (7, NULL)
+ON CONFLICT (dia_iso) DO UPDATE SET hora_salida = EXCLUDED.hora_salida, actualizado_en = now();
+
+INSERT INTO bateria_excepcion (tipo, fecha, hora, consumo_km) VALUES ('viaje_largo', '2026-11-21', '07:30', 350);
+UPDATE bateria_excepcion SET anulada_en = now() WHERE id = 3;  -- baja
+```
+
+Un viaje largo con fecha de hoy o pasada cambia trayectos ya guardados:
+después, `bateria recalcular`. El horario y las excepciones futuras no lo
+necesitan.
+

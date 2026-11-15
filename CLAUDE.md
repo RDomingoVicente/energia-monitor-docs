@@ -25,8 +25,12 @@ Antes de cualquier cambio, leer:
 - Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 2, batería y
   previsión** (tarea: docs/tareas/etapa-2-bateria.md, cuatro pasos que se
   revisan uno a uno). Paso 1 hecho: dashboards separados por tema
-  (`grafana/energia-precios.json` y `grafana/energia-coche.json`). La etapa
-  3 no se empieza hasta nuevo aviso.
+  (`grafana/energia-precios.json` y `grafana/energia-coche.json`). Paso 2
+  hecho (v0.5.0): migración 0014 (nivel de batería, trayectos,
+  reconciliación y previsión, en `recalcular_bateria()`), CLI `bateria` y
+  recálculo desde el muestreo; referencia en Python en
+  `src/energia_monitor/bateria.py`. La etapa 3 no se empieza hasta nuevo
+  aviso.
 
 ## Estructura
 
@@ -56,7 +60,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0014).
+  migración nueva (la siguiente es la 0015).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de
