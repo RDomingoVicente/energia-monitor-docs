@@ -243,7 +243,19 @@ Entrega:
      de Inicio solo en móvil), test de visibilidad por tamaño, logo y
      favicon (formulario-maquetas.md, 3) y caja «Modelo» en el diagrama de
      la Ayuda. Pendiente: desplegar en el NAS.
-4. Dashboard de batería (E2.10, segunda parte): pendiente.
+4. Dashboard de batería (E2.10, segunda parte), sin migraciones ni imagen:
+   `grafana/energia-bateria.json` (`uid` `energia-bateria`, el del enlace
+   del formulario) con nivel ahora, próxima salida, objetivo, energía
+   necesaria y avisos; nivel en 7 días (reconciliado y previsto, lecturas
+   como puntos, sesiones y trayectos como regiones, cargas externas y
+   completas como puntos); acierto de la estimación; próximas salidas;
+   trayectos recientes, y cargas externas. «Energía: coche» separa casa y
+   fuera (E2.9, sección 8, punto 7 de formulario-maquetas.md), con el €/kWh
+   de cada uno aparte. Verificado con tests: cada consulta como
+   `grafana_ro` contra un historial con lectura, carga, trayecto y carga
+   externa, y las cifras frente a la página Historial y las vistas.
+   Pendiente: importar en el NAS y comprobar la navegación entre los tres
+   dashboards.
 
 ### Objetivo
 

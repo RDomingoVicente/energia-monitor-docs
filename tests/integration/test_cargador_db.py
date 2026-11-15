@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
@@ -558,8 +559,8 @@ def sql_panel(titulo: str, ahora: datetime, desde: datetime, hasta: datetime) ->
     panel = next(p for p in DASHBOARD["panels"] if p["title"] == titulo)
     sql = (panel["targets"][0]["rawSql"]
            .replace("$contrato", "vivienda").replace("$fuente", FUENTE)
-           .replace("now()", f"'{ahora.isoformat()}'::timestamptz")
-           .replace("$__timeFilter(inicio)", f"inicio BETWEEN '{desde.isoformat()}' AND '{hasta.isoformat()}'"))
+           .replace("now()", f"'{ahora.isoformat()}'::timestamptz"))
+    sql = re.sub(r"\$__timeFilter\((\w+)\)", rf"\1 BETWEEN '{desde.isoformat()}' AND '{hasta.isoformat()}'", sql)
     assert "$" not in sql
     return sql
 
@@ -578,19 +579,26 @@ def test_consultas_de_la_fila_coche(conn: psycopg.Connection, limpio: None, titu
     conn.execute("INSERT INTO serie_esios (indicador, geo_id, inicio, fin, valor, publicado_en, primer_valor)"
                  " VALUES (%s, %s, %s, %s, 150, %s, 150)", (indicador, geo, ini, ini + timedelta(hours=1), ini))
     ahora = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
-    filas = conn.execute(sql_panel(titulo, ahora, datetime(2026, 11, 3, 23, 0, tzinfo=UTC), ahora)).fetchall()
+    cur = conn.execute(sql_panel(titulo, ahora, datetime(2026, 11, 3, 23, 0, tzinfo=UTC), ahora))
+    nombres = [d.name for d in cur.description or []]
+    filas = cur.fetchall()
     if titulo == "Gasto diario del coche (30 días)":
-        # Un día solo estimado no tiene "Medido" y viceversa; la energía siempre.
-        assert [(f[1] is None, f[2] is None) for f in filas] == [(True, False), (False, True)], filas
-        assert cerca(filas[0][3], D("8.64"), "1e-6") and cerca(filas[1][3], D("8.448"))
+        # Un día solo estimado no tiene "Medido" y viceversa; la energía siempre. Sin cargas externas, nada fuera.
+        assert [(f[1] is None, f[2] is None, f[3]) for f in filas] == [(True, False, None), (False, True, None)], filas
+        assert cerca(filas[0][4], D("8.64"), "1e-6") and cerca(filas[1][4], D("8.448"))
         return
     if titulo == "Estado del cargador":
         # Cargando: la casa es desconocida (homePower = 0 durante la carga).
         assert filas == [("Cargando", D(4400), None, 3600)]
         return
-    assert filas and all(v is not None for v in filas[0]), filas
+    # Sin cargas externas, el €/kWh de fuera queda vacío (no 0 ni el de casa); el resto, con valor.
+    vacios = {n for n in nombres if "fuera" in n.lower() and "€/kWh" in n}
+    assert filas and all(v is not None for n, v in zip(nombres, filas[0]) if n not in vacios), filas
+    assert all(v is None for n, v in zip(nombres, filas[0]) if n in vacios), filas
     if titulo == "Gasto del coche":
-        hoy_kwh, mes_kwh, mes_estimado = filas[0][1], filas[0][5], filas[0][6]
-        assert hoy_kwh > 0 and cerca(mes_estimado, D("8.64"), "1e-6") and mes_kwh > hoy_kwh
+        f = dict(zip(nombres, filas[0]))
+        assert f["Hoy casa (kWh)"] > 0 and cerca(f["Mes casa estimado (kWh)"], D("8.64"), "1e-6")
+        assert f["Mes casa (kWh)"] > f["Hoy casa (kWh)"]
+        assert (f["Hoy fuera (€)"], f["Mes fuera (€)"], f["Mes fuera (kWh)"]) == (0, 0, 0)
     if titulo == "Sesiones recientes":
         assert [f[5] for f in filas] == ["Medida", "Estimada"]

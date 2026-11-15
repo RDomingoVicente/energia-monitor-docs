@@ -104,7 +104,7 @@
       "id": 17,
       "type": "stat",
       "title": "Gasto del coche",
-      "description": "Euros (con IEE e IVA) y kWh del coche hoy, en la semana y en el mes en curso (Europe/Madrid). kWh corregidos con el factor del contador del cargador (parámetro estimado). \"Mes estimado\": energía de sesiones anteriores al muestreo, repartida a potencia constante.",
+      "description": "Euros y kWh del coche hoy, en la semana y en el mes en curso (Europe/Madrid), en casa y fuera. Casa: euros con IEE e IVA y kWh corregidos con el factor del contador del cargador (parámetro estimado); \"Mes estimado\": energía de sesiones anteriores al muestreo, repartida a potencia constante. Fuera: cargas externas anotadas en el formulario, con el coste pagado y los kWh del cargador externo.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
@@ -112,8 +112,8 @@
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 12,
-        "h": 5
+        "w": 16,
+        "h": 6
       },
       "targets": [
         {
@@ -125,7 +125,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH lim AS (\n  SELECT\n    date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS hoy,\n    date_trunc('week', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS semana,\n    date_trunc('month', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS mes\n)\nSELECT\n  coalesce(sum(c.coste_eur)   FILTER (WHERE c.inicio >= l.hoy), 0)    AS \"Hoy (€)\",\n  coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.hoy), 0)    AS \"Hoy (kWh)\",\n  coalesce(sum(c.coste_eur)   FILTER (WHERE c.inicio >= l.semana), 0) AS \"Semana (€)\",\n  coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.semana), 0) AS \"Semana (kWh)\",\n  coalesce(sum(c.coste_eur)   FILTER (WHERE c.inicio >= l.mes), 0)    AS \"Mes (€)\",\n  coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.mes), 0)    AS \"Mes (kWh)\",\n  coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.mes AND c.origen_energia <> 'muestreo'), 0)\n    AS \"Mes estimado (kWh)\"\nFROM lim l\nLEFT JOIN v_coste_tramo c\n  ON c.contrato = '$contrato' AND c.fuente = '$fuente' AND c.consumidor = 'coche'\n AND c.inicio >= least(l.semana, l.mes) AND c.inicio < now()"
+          "rawSql": "WITH lim AS (\n  SELECT\n    date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS hoy,\n    date_trunc('week', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS semana,\n    date_trunc('month', now() AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS mes\n), casa AS (\n  SELECT\n    coalesce(sum(c.coste_eur)   FILTER (WHERE c.inicio >= l.hoy), 0)    AS hoy_eur,\n    coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.hoy), 0)    AS hoy_kwh,\n    coalesce(sum(c.coste_eur)   FILTER (WHERE c.inicio >= l.semana), 0) AS semana_eur,\n    coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.semana), 0) AS semana_kwh,\n    coalesce(sum(c.coste_eur)   FILTER (WHERE c.inicio >= l.mes), 0)    AS mes_eur,\n    coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.mes), 0)    AS mes_kwh,\n    coalesce(sum(c.energia_kwh) FILTER (WHERE c.inicio >= l.mes AND c.origen_energia <> 'muestreo'), 0) AS mes_estimado_kwh\n  FROM lim l\n  LEFT JOIN v_coste_tramo c\n    ON c.contrato = '$contrato' AND c.fuente = '$fuente' AND c.consumidor = 'coche'\n   AND c.inicio >= least(l.semana, l.mes) AND c.inicio < now()\n), fuera AS (\n  SELECT\n    coalesce(sum(x.coste_eur) FILTER (WHERE x.instante >= l.hoy), 0)    AS hoy_eur,\n    coalesce(sum(x.kwh)       FILTER (WHERE x.instante >= l.hoy), 0)    AS hoy_kwh,\n    coalesce(sum(x.coste_eur) FILTER (WHERE x.instante >= l.semana), 0) AS semana_eur,\n    coalesce(sum(x.kwh)       FILTER (WHERE x.instante >= l.semana), 0) AS semana_kwh,\n    coalesce(sum(x.coste_eur) FILTER (WHERE x.instante >= l.mes), 0)    AS mes_eur,\n    coalesce(sum(x.kwh)       FILTER (WHERE x.instante >= l.mes), 0)    AS mes_kwh\n  FROM lim l\n  LEFT JOIN v_coste_carga_externa x ON x.instante >= least(l.semana, l.mes) AND x.instante < now()\n)\nSELECT\n  casa.hoy_eur AS \"Hoy casa (€)\", fuera.hoy_eur AS \"Hoy fuera (€)\",\n  casa.hoy_kwh AS \"Hoy casa (kWh)\", fuera.hoy_kwh AS \"Hoy fuera (kWh)\",\n  casa.semana_eur AS \"Semana casa (€)\", fuera.semana_eur AS \"Semana fuera (€)\",\n  casa.semana_kwh AS \"Semana casa (kWh)\", fuera.semana_kwh AS \"Semana fuera (kWh)\",\n  casa.mes_eur AS \"Mes casa (€)\", fuera.mes_eur AS \"Mes fuera (€)\",\n  casa.mes_kwh AS \"Mes casa (kWh)\", fuera.mes_kwh AS \"Mes fuera (kWh)\",\n  casa.mes_estimado_kwh AS \"Mes casa estimado (kWh)\"\nFROM casa, fuera"
         }
       ],
       "fieldConfig": {
@@ -217,16 +217,16 @@
       "id": 18,
       "type": "stat",
       "title": "Gasto en el rango",
-      "description": "Euros, kWh y €/kWh medio del coche en el rango del selector. \"Estimado\": kWh de sesiones anteriores al muestreo.",
+      "description": "Euros, kWh y €/kWh medio del coche en el rango del selector, en casa y fuera por separado (el €/kWh no mezcla las dos). \"Estimado\": kWh de casa de sesiones anteriores al muestreo. Fuera: €/kWh solo de las cargas externas con kWh y coste.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 5
+        "x": 0,
+        "y": 6,
+        "w": 10,
+        "h": 6
       },
       "targets": [
         {
@@ -238,7 +238,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  coalesce(sum(coste_eur), 0)   AS \"Gasto (€)\",\n  coalesce(sum(energia_kwh), 0) AS \"Energía (kWh)\",\n  sum(coste_eur) / nullif(sum(energia_kwh), 0) AS \"Medio (€/kWh)\",\n  coalesce(sum(energia_kwh) FILTER (WHERE origen_energia <> 'muestreo'), 0) AS \"Estimado (kWh)\"\nFROM v_coste_tramo\nWHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche'"
+          "rawSql": "WITH casa AS (\n  SELECT\n    coalesce(sum(coste_eur), 0)   AS eur,\n    coalesce(sum(energia_kwh), 0) AS kwh,\n    sum(coste_eur) / nullif(sum(energia_kwh), 0) AS eur_kwh,\n    coalesce(sum(energia_kwh) FILTER (WHERE origen_energia <> 'muestreo'), 0) AS estimado_kwh\n  FROM v_coste_tramo\n  WHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche'\n), fuera AS (\n  SELECT\n    coalesce(sum(coste_eur), 0) AS eur,\n    coalesce(sum(kwh), 0)       AS kwh,\n    sum(coste_eur) FILTER (WHERE kwh > 0 AND coste_eur IS NOT NULL)\n      / nullif(sum(kwh) FILTER (WHERE kwh > 0 AND coste_eur IS NOT NULL), 0) AS eur_kwh\n  FROM v_coste_carga_externa\n  WHERE $__timeFilter(instante)\n)\nSELECT\n  casa.eur AS \"Casa (€)\", fuera.eur AS \"Fuera (€)\",\n  casa.kwh AS \"Casa (kWh)\", fuera.kwh AS \"Fuera (kWh)\",\n  casa.eur_kwh AS \"Medio casa (€/kWh)\", fuera.eur_kwh AS \"Medio fuera (€/kWh)\",\n  casa.estimado_kwh AS \"Casa estimado (kWh)\"\nFROM casa, fuera"
         }
       ],
       "fieldConfig": {
@@ -330,15 +330,15 @@
       "id": 19,
       "type": "stat",
       "title": "Precio medio pagado",
-      "description": "€/kWh pagado por el coche (ponderado por su energía) frente a la media simple del precio final en el mismo rango, hasta ahora. Ambos con IEE e IVA.",
+      "description": "€/kWh pagado por el coche en casa (ponderado por su energía, con IEE e IVA) frente a la media simple del precio final en el mismo rango, hasta ahora; y, aparte, el €/kWh de las cargas externas con kWh y coste. Casa y fuera no se mezclan.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
       },
       "gridPos": {
-        "x": 0,
-        "y": 5,
-        "w": 8,
+        "x": 10,
+        "y": 6,
+        "w": 7,
         "h": 6
       },
       "targets": [
@@ -351,7 +351,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  (SELECT sum(coste_eur) / nullif(sum(energia_kwh), 0) FROM v_coste_tramo\n    WHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche') AS \"Coche (€/kWh)\",\n  (SELECT avg(precio_final_eur_kwh) FROM mv_precio_final\n    WHERE $__timeFilter(inicio) AND inicio < now() AND contrato = '$contrato' AND fuente = '$fuente')\n    AS \"Media simple (€/kWh)\""
+          "rawSql": "SELECT\n  (SELECT sum(coste_eur) / nullif(sum(energia_kwh), 0) FROM v_coste_tramo\n    WHERE $__timeFilter(inicio) AND contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche') AS \"Casa (€/kWh)\",\n  (SELECT avg(precio_final_eur_kwh) FROM mv_precio_final\n    WHERE $__timeFilter(inicio) AND inicio < now() AND contrato = '$contrato' AND fuente = '$fuente')\n    AS \"Media simple (€/kWh)\",\n  (SELECT sum(coste_eur) / nullif(sum(kwh), 0) FROM v_coste_carga_externa\n    WHERE $__timeFilter(instante) AND kwh > 0 AND coste_eur IS NOT NULL) AS \"Fuera (€/kWh)\""
         }
       ],
       "fieldConfig": {
@@ -443,15 +443,15 @@
       "id": 20,
       "type": "stat",
       "title": "Frente al PVPC",
-      "description": "Coste real del coche y coste de la misma energía con el PVPC 2.0TD, ambos con IEE e IVA, en el rango del selector. Solo tramos con PVPC publicado.",
+      "description": "Coste real del coche y coste de la misma energía con el PVPC 2.0TD, ambos con IEE e IVA, en el rango del selector. Solo tramos con PVPC publicado. Solo la energía cargada en casa: las cargas externas no tienen PVPC.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
       },
       "gridPos": {
-        "x": 8,
-        "y": 5,
-        "w": 8,
+        "x": 17,
+        "y": 6,
+        "w": 7,
         "h": 6
       },
       "targets": [
@@ -563,7 +563,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 5,
+        "y": 0,
         "w": 8,
         "h": 6
       },
@@ -671,14 +671,14 @@
       "id": 22,
       "type": "timeseries",
       "title": "Gasto diario del coche (30 días)",
-      "description": "Euros por día (con IEE e IVA), medidos y estimados apilados, y kWh corregidos en el eje derecho. Eje fijo de 30 días (como \"Precio final: media diaria\"), sea cual sea el rango del selector.",
+      "description": "Euros por día: en casa (con IEE e IVA), medidos y estimados, y fuera de casa (cargas externas), apilados; kWh del día (casa corregidos + fuera) en el eje derecho. Eje fijo de 30 días (como \"Precio final: media diaria\"), sea cual sea el rango del selector.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
       },
       "gridPos": {
         "x": 0,
-        "y": 11,
+        "y": 12,
         "w": 16,
         "h": 9
       },
@@ -692,7 +692,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  date_trunc('day', inicio AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS time,\n  sum(coste_eur) FILTER (WHERE origen_energia = 'muestreo')  AS \"Medido (€)\",\n  sum(coste_eur) FILTER (WHERE origen_energia <> 'muestreo') AS \"Estimado (€)\",\n  sum(energia_kwh) AS \"Energía (kWh)\"\nFROM v_coste_tramo\nWHERE contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche'\n  AND inicio >= (date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') - interval '29 days') AT TIME ZONE 'Europe/Madrid'\nGROUP BY 1\nORDER BY 1"
+          "rawSql": "WITH desde AS (\n  SELECT (date_trunc('day', now() AT TIME ZONE 'Europe/Madrid') - interval '29 days') AT TIME ZONE 'Europe/Madrid' AS t\n), d AS (\n  SELECT\n    date_trunc('day', inicio AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid' AS dia,\n    CASE WHEN origen_energia = 'muestreo' THEN coste_eur END AS medido,\n    CASE WHEN origen_energia <> 'muestreo' THEN coste_eur END AS estimado,\n    NULL::numeric AS fuera,\n    energia_kwh AS kwh\n  FROM v_coste_tramo, desde\n  WHERE contrato = '$contrato' AND fuente = '$fuente' AND consumidor = 'coche' AND inicio >= desde.t\n  UNION ALL\n  SELECT\n    date_trunc('day', instante AT TIME ZONE 'Europe/Madrid') AT TIME ZONE 'Europe/Madrid',\n    NULL, NULL, coste_eur, kwh\n  FROM v_coste_carga_externa, desde\n  WHERE instante >= desde.t AND instante < now()\n)\nSELECT\n  dia AS time,\n  sum(medido)   AS \"Medido (€)\",\n  sum(estimado) AS \"Estimado (€)\",\n  sum(fuera)    AS \"Fuera de casa (€)\",\n  sum(kwh)      AS \"Energía (kWh)\"\nFROM d\nGROUP BY 1\nORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -743,6 +743,21 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Fuera de casa (€)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
                 }
               }
             ]
@@ -815,7 +830,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 11,
+        "y": 12,
         "w": 8,
         "h": 9
       },
@@ -912,7 +927,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 21,
         "w": 24,
         "h": 10
       },

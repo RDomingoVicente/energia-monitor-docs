@@ -1,0 +1,2006 @@
+{
+  "uid": "energia-bateria",
+  "title": "Energía: batería",
+  "description": "Nivel de batería estimado, próxima salida y energía necesaria, acierto de la estimación, trayectos y cargas fuera de casa (fase 2, etapa 2) de energia-monitor.",
+  "tags": [
+    "energia"
+  ],
+  "timezone": "Europe/Madrid",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now/d",
+    "to": "now+1d/d"
+  },
+  "timepicker": {},
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "weekStart": "monday",
+  "annotations": {
+    "list": [
+      {
+        "name": "Cargas en casa",
+        "enable": true,
+        "hide": false,
+        "iconColor": "#3FB950",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${ds}"
+        },
+        "filter": {
+          "exclude": false,
+          "ids": [
+            30
+          ]
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Región: inicio y fin de la sesión.\nSELECT s.inicio AS time, s.fin AS timeend,\n       'Carga en casa: +' || replace(to_char(s.energia_wh / 1000 * s.factor, 'FM999990.0'), '.', ',') || ' kWh a la batería' AS text,\n       'sesion' AS tags\nFROM bateria_sesion s\nWHERE s.inicio < $__timeTo() AND s.fin > $__timeFrom()\nORDER BY 1"
+        }
+      },
+      {
+        "name": "Trayectos",
+        "enable": true,
+        "hide": false,
+        "iconColor": "#A371F7",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${ds}"
+        },
+        "filter": {
+          "exclude": false,
+          "ids": [
+            30
+          ]
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Región: salida y llegada (hasta ahora si el coche sigue fuera).\nSELECT t.salida AS time, coalesce(t.llegada, now()) AS timeend,\n       CASE WHEN t.llegada IS NULL THEN 'Trayecto en curso'\n            ELSE 'Trayecto: −' || replace(to_char(t.consumo_kwh, 'FM999990.0'), '.', ',') || ' kWh (' || t.origen_consumo || ')' END AS text,\n       'trayecto' AS tags\nFROM bateria_trayecto t\nWHERE NOT t.corto AND t.salida < $__timeTo() AND coalesce(t.llegada, now()) > $__timeFrom()\nORDER BY 1"
+        }
+      },
+      {
+        "name": "Cargas externas y carga completa",
+        "enable": true,
+        "hide": false,
+        "iconColor": "#58A6FF",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${ds}"
+        },
+        "filter": {
+          "exclude": false,
+          "ids": [
+            30
+          ]
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Puntos: cargas externas y cargas completas detectadas.\nSELECT x.instante AS time,\n       'Carga externa: ' || coalesce(replace(to_char(x.kwh, 'FM999990.0'), '.', ',') || ' kWh', 'sin kWh')\n         || coalesce(' · ' || replace(to_char(x.coste_eur, 'FM999990.00'), '.', ',') || ' €', '') || coalesce(' · ' || x.nota, '') AS text,\n       'carga_externa' AS tags\nFROM bateria_carga_externa x\nWHERE x.anulada_en IS NULL AND $__timeFilter(x.instante)\nUNION ALL\nSELECT s.fin, 'Carga completa: nivel al ' || replace(to_char(bateria_param('tope_pct', s.fin), 'FM999990.'), '.', ',') || ' %', 'carga_completa'\nFROM bateria_sesion s\nWHERE s.cierre = 'carga_completa' AND $__timeFilter(s.fin)\nORDER BY 1"
+        }
+      }
+    ]
+  },
+  "links": [
+    {
+      "title": "Energía",
+      "type": "dashboards",
+      "tags": [
+        "energia"
+      ],
+      "asDropdown": false,
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link",
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "Datasource",
+        "type": "datasource",
+        "query": "grafana-postgresql-datasource",
+        "current": {},
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "options": []
+      },
+      {
+        "name": "contrato",
+        "label": "Contrato",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${ds}"
+        },
+        "query": "SELECT id FROM contrato ORDER BY id",
+        "definition": "SELECT id FROM contrato ORDER BY id",
+        "current": {
+          "text": "vivienda",
+          "value": "vivienda"
+        },
+        "refresh": 1,
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "sort": 0,
+        "regex": "",
+        "skipUrlSync": false,
+        "options": []
+      },
+      {
+        "name": "fuente",
+        "label": "Fuente",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${ds}"
+        },
+        "query": "SELECT DISTINCT fuente FROM precio_mercado ORDER BY 1",
+        "definition": "SELECT DISTINCT fuente FROM precio_mercado ORDER BY 1",
+        "current": {
+          "text": "omie",
+          "value": "omie"
+        },
+        "refresh": 1,
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "sort": 0,
+        "regex": "",
+        "skipUrlSync": false,
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Nivel ahora",
+      "description": "Nivel estimado ahora y su fiabilidad, con los mismos colores que el formulario: LEÍDO (verde, lectura sin nada después), LEÍDO + CARGA (azul, solo cargas desde la lectura) y ESTIMADO (ámbar, con trayectos).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 5,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(%\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: %"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(pts\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: pts"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(h\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Confianza"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "leido": {
+                        "text": "LEÍDO",
+                        "color": "#3FB950",
+                        "index": 0
+                      },
+                      "leido_carga": {
+                        "text": "LEÍDO + CARGA",
+                        "color": "#58A6FF",
+                        "index": 1
+                      },
+                      "estimado": {
+                        "text": "ESTIMADO",
+                        "color": "#D29922",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT nivel_pct AS \"Nivel (%)\", nivel_kwh AS \"Nivel (kWh)\", confianza AS \"Confianza\"\nFROM v_bateria_estado"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Próxima salida",
+      "description": "Primera salida de los próximos 7 días según el horario y las excepciones, y el consumo previsto: el P75 (historia o parámetro inicial) o el declarado en la excepción.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 5,
+        "y": 0,
+        "w": 5,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(%\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: %"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(pts\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: pts"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(h\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  coalesce((ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM proxima_salida AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(proxima_salida AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI'), 'sin salidas en 7 días') AS \"Salida\",\n  CASE tipo_salida WHEN 'horario' THEN 'Horario' WHEN 'con_salida' THEN 'Excepción' END AS \"Origen\",\n  consumo_plan_kwh AS \"Consumo previsto (kWh)\"\nFROM v_bateria_estado"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Objetivo de salida",
+      "description": "Nivel con el que conviene salir: reserva + consumo previsto (o el mínimo de la excepción, si es mayor), recortado al tope.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(%\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: %"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(pts\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: pts"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(h\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT objetivo_pct AS \"Objetivo (%)\", objetivo_kwh AS \"Objetivo (kWh)\"\nFROM v_bateria_estado"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Energía necesaria",
+      "description": "kWh que faltan en la batería para llegar al objetivo de la próxima salida, y los puntos de batería (1 pt = capacidad útil / 100).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 0,
+        "w": 5,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(%\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: %"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(pts\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: pts"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(h\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  energia_necesaria_kwh AS \"Energía necesaria (kWh)\",\n  greatest(objetivo_pct - nivel_pct, 0) AS \"Faltan (pts)\"\nFROM v_bateria_estado"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Avisos activos",
+      "description": "Avisos del formulario ahora mismo (página Avisos): error, aviso e informativos.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 19,
+        "y": 0,
+        "w": 5,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(%\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: %"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(pts\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: pts"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(h\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Aviso"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#D29922"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Info"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#58A6FF"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  count(*) FILTER (WHERE nivel = 'error') AS \"Error\",\n  count(*) FILTER (WHERE nivel = 'aviso') AS \"Aviso\",\n  count(*) FILTER (WHERE nivel = 'info')  AS \"Info\"\nFROM v_aviso"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Nivel de batería (7 días)",
+      "description": "Nivel estimado (línea; con los consumos reconciliados con las lecturas) y previsto (discontinua; con los consumos estimados al ocurrir cada trayecto), lecturas como puntos, reserva y tope. Regiones: cargas en casa (verde) y trayectos (morado); puntos: cargas externas y cargas completas. Eje fijo de 7 días, sea cual sea el rango del selector.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 16,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Nivel (%)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#58A6FF"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Previsto (%)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8B949E"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Lectura (%)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3FB950"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "points"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 9
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Reserva (%)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#D29922"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tope (%)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8B949E"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Nivel después de cada evento; antes de cada sesión o trayecto, el nivel previo en su inicio (si empieza\n-- después del evento anterior), para que la línea quede plana mientras el coche está parado. Al principio\n-- del rango, el último nivel anterior; al final, el de ahora. «o» ordena los empates.\nWITH n AS (\n  SELECT b.n, b.instante, b.nivel_pct,\n         b.nivel_estimado_kwh / bateria_param('capacidad_util_kwh', b.instante) * 100 AS previsto_pct,\n         CASE b.tipo WHEN 'sesion' THEN s.inicio WHEN 'trayecto' THEN b.trayecto_salida END AS empieza\n  FROM bateria_nivel b\n  LEFT JOIN bateria_sesion s ON b.tipo = 'sesion' AND s.conector = b.conector AND s.id = b.sesion_id\n), p AS (\n  SELECT n.*, lag(instante) OVER w AS antes_t, lag(nivel_pct) OVER w AS antes_pct,\n         lag(previsto_pct) OVER w AS antes_previsto\n  FROM n\n  WINDOW w AS (ORDER BY n.n)\n), puntos AS (\n  SELECT empieza AS t, n * 2 - 1 AS o, antes_pct AS nivel, antes_previsto AS previsto\n  FROM p WHERE empieza > antes_t\n  UNION ALL\n  SELECT instante, n * 2, nivel_pct, previsto_pct FROM p\n  UNION ALL\n  SELECT now(), 2147483647, nivel_pct, NULL FROM v_bateria_estado\n)\nSELECT t AS time, nivel AS \"Nivel (%)\", previsto AS \"Previsto (%)\"\nFROM (\n  SELECT t, o, nivel, previsto FROM puntos WHERE $__timeFilter(t)\n  UNION ALL\n  (SELECT $__timeFrom()::timestamptz, -1, nivel, previsto FROM puntos WHERE t < $__timeFrom() ORDER BY t DESC, o DESC\n   LIMIT 1)\n) x\nORDER BY t, o"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT instante AS time, pct AS \"Lectura (%)\"\nFROM bateria_lectura\nWHERE anulada_en IS NULL AND $__timeFilter(instante)\nORDER BY 1"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT t AS time, bateria_param('reserva_pct', now()) AS \"Reserva (%)\", bateria_param('tope_pct', now()) AS \"Tope (%)\"\nFROM (VALUES ($__timeFrom()::timestamptz), ($__timeTo()::timestamptz)) v(t)\nORDER BY 1"
+        }
+      ],
+      "timeFrom": "7d"
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "Acierto de la estimación (30 días)",
+      "description": "Lecturas comparables de los últimos 30 días (las mismas que en la página Historial): error medio con signo (leído − estimado; negativo: el coche suele tener menos de lo estimado) y error absoluto medio, en puntos de batería y en kWh.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 5,
+        "w": 8,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(%\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: %"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(pts\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: pts"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(h\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  avg(h.diferencia_pts) AS \"Error medio (pts)\",\n  avg(abs(h.diferencia_pts)) AS \"Error absoluto medio (pts)\",\n  avg(abs(h.diferencia_pts)) * bateria_param('capacidad_util_kwh', now()) / 100 AS \"Error absoluto medio (kWh)\",\n  count(*) AS \"Lecturas comparables\"\nFROM v_bateria_lectura_historial h\nWHERE h.anulada_en IS NULL AND h.comparable\n  AND h.instante >= now() - interval '30 days' AND h.instante <= now()"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Estimado frente a leído (7 días)",
+      "description": "En cada lectura comparable, leído − estimado justo antes, en puntos de batería. Negativo: el coche tenía menos de lo estimado. Eje fijo de 7 días.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: pts",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#58A6FF"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "barAlignment": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT instante AS time, diferencia_pts AS \"Leído − estimado (pts)\"\nFROM v_bateria_lectura_historial\nWHERE anulada_en IS NULL AND comparable AND $__timeFilter(instante)\nORDER BY 1"
+        }
+      ],
+      "timeFrom": "7d"
+    },
+    {
+      "id": 33,
+      "type": "table",
+      "title": "Próximas salidas (7 días)",
+      "description": "Salidas de los próximos 7 días con su origen, consumo previsto, objetivo y, en la primera, la energía necesaria. «recortado al tope»: el objetivo pedido superaba el tope de carga.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Consumo previsto (kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Objetivo (%)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Energía necesaria (kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM salida AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(salida AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS \"Salida\",\n  CASE tipo WHEN 'horario' THEN 'Horario' ELSE 'Excepción' END AS \"Origen\",\n  consumo_previsto_kwh AS \"Consumo previsto (kWh)\",\n  objetivo_kwh / bateria_param('capacidad_util_kwh', salida) * 100 AS \"Objetivo (%)\",\n  energia_necesaria_kwh AS \"Energía necesaria (kWh)\",\n  CASE WHEN objetivo_sin_tope_kwh > objetivo_kwh THEN 'recortado al tope' END AS \"Nota\"\nFROM v_bateria_salida\nORDER BY salida"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "table",
+      "title": "Trayectos recientes",
+      "description": "Últimos 15 trayectos (sin las desconexiones cortas). Consumo aplicado: el reconciliado con lecturas si lo hay; si no, el estimado (mediana de los recientes), el inicial (parámetro, sin historia) o el declarado en una excepción. Vacío mientras el coche está fuera.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duración (h)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Consumo (kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Consumo (pts)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Estimado (kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Origen"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM salida AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(salida AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS \"Salida\",\n  CASE WHEN llegada IS NULL THEN 'fuera' ELSE (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM llegada AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(llegada AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') END AS \"Llegada\",\n  extract(epoch FROM coalesce(llegada, now()) - salida) / 3600 AS \"Duración (h)\",\n  consumo_kwh AS \"Consumo (kWh)\",\n  consumo_kwh / bateria_param('capacidad_util_kwh', salida) * 100 AS \"Consumo (pts)\",\n  consumo_estimado_kwh AS \"Estimado (kWh)\",\n  CASE origen_consumo\n    WHEN 'reconciliado' THEN 'Reconciliado con lecturas'\n    WHEN 'estimado' THEN 'Estimado (mediana)'\n    WHEN 'inicial' THEN 'Inicial (parámetro)'\n    WHEN 'declarado' THEN 'Declarado (excepción)'\n    WHEN 'cero' THEN 'Cero'\n  END AS \"Origen\",\n  CASE WHEN viaje_largo THEN 'sí' END AS \"Viaje largo\"\nFROM bateria_trayecto\nWHERE NOT corto\nORDER BY salida DESC\nLIMIT 15"
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "type": "stat",
+      "title": "Fuera de casa en el rango",
+      "description": "Cargas externas en el rango del selector: coste pagado, kWh cargados (sin el factor de eficiencia) y €/kWh medio de las que tienen kWh y coste.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/€\\/kWh\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: €/kWh"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(%\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: %"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(pts\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: pts"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/\\(h\\)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  coalesce(sum(coste_eur), 0) AS \"Coste (€)\",\n  coalesce(sum(kwh), 0) AS \"Energía (kWh)\",\n  sum(coste_eur) FILTER (WHERE kwh > 0 AND coste_eur IS NOT NULL)\n    / nullif(sum(kwh) FILTER (WHERE kwh > 0 AND coste_eur IS NOT NULL), 0) AS \"Medio (€/kWh)\",\n  count(*) AS \"Cargas\"\nFROM v_coste_carga_externa\nWHERE $__timeFilter(instante)"
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "type": "table",
+      "title": "Cargas externas (90 días)",
+      "description": "Cargas hechas fuera de casa en los últimos 90 días, anotadas en el formulario. «A la batería»: kWh × eficiencia de carga, en puntos. Sin kWh, no suman al nivel.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 33,
+        "w": 18,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Energía (kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "A la batería (pts)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Coste (€)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Medio (€/kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${ds}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM instante AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(instante AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS \"Fecha\",\n  kwh AS \"Energía (kWh)\",\n  pts AS \"A la batería (pts)\",\n  coste_eur AS \"Coste (€)\",\n  eur_kwh AS \"Medio (€/kWh)\",\n  nota AS \"Lugar o nota\"\nFROM v_coste_carga_externa\nWHERE instante >= now() - interval '90 days'\nORDER BY instante DESC"
+        }
+      ]
+    }
+  ],
+  "version": 1
+}

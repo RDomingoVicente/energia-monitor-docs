@@ -343,7 +343,7 @@ aviso «¿Cargaste fuera de casa?».
    encima del tope») y tabla `aviso_historial` (tipo, inicio, fin, detalle)
    mantenida por el recálculo periódico.
 6. Horario sin vigencia (decisión tomada): no hay cambio de modelo.
-7. **Hecho en v0.5.2** (los paneles de coste de Grafana, en el paso 4).
+7. **Hecho en v0.5.2**; los paneles de coste de Grafana, en el paso 4 (hecho).
    Cargas externas: evento nuevo `carga_externa` en el registro de batería
    (instante, `kwh` NULL si se desconoce, `coste_eur` NULL si se desconoce,
    nota; corregir y anular como las lecturas).

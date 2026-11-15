@@ -39,7 +39,8 @@ Antes de cualquier cambio, leer:
   `src/energia_monitor/formulario/`, deploy/README.md). Paso 3b, segunda
   entrega (v0.5.5): resto de pantallas y tests de interfaz con Playwright
   (tests/ui/, solo en local). v0.5.6: arreglos de la Ayuda, logo y favicon.
-  Falta el paso 4 (dashboard de batería). La
+  Paso 4 hecho (solo JSON): `grafana/energia-bateria.json` y casa · fuera en
+  «Energía: coche»; pendiente importarlo y la aceptación en el NAS. La
   etapa 3 no se empieza hasta nuevo aviso.
 
 ## Estructura

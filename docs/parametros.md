@@ -178,7 +178,9 @@ docker compose exec collector python -m energia_monitor bateria carga-externa --
   ESTIMADO) y devuelve 1 si hay avisos (catálogo de
   formulario-maquetas.md, 7.7).
 - `bateria recalcular` dice cuánto ha tardado (también en
-  `bateria_recalculo`).
+  `bateria_recalculo`). El dashboard «Energía: batería» lee lo que deja el
+  recálculo: tras cambiar lecturas, sesiones o cargas externas por SQL, no
+  cambia hasta ejecutarlo.
 - `bateria carga-externa`: carga fuera de casa, con kWh y coste opcionales.
   Solo con el coche desconectado a esa hora. Sin kWh no suma al nivel y el
   intervalo queda fuera de la estadística: al volver, anota una lectura.
