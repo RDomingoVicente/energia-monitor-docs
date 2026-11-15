@@ -163,6 +163,13 @@ def test_clasificacion_del_fin_de_sesion() -> None:
     assert [s.cierre for s in r.sesiones] == ["fin_franja", "dudoso", "desconexion", "pendiente"]
 
 
+def test_sesiones_anteriores_al_muestreo() -> None:
+    _, _, r = calcular("sesiones_sin_muestreo")
+    assert [s.cierre for s in r.sesiones] == ["sin_muestreo", "desconexion", "dudoso"]
+    # Como dudoso, no es un valor absoluto: suma su energía.
+    assert [ev.tipo for ev in r.eventos] == ["lectura", "sesion", "sesion", "sesion"]
+
+
 def test_regla_de_carga_completa_desactivable() -> None:
     e, ahora = ESCENARIOS["carga_completa"]()
     filas = [Parametro(c, date(2026, 1, 1), None, v) for c, v in bateria.PARAMETROS_INICIALES.items()

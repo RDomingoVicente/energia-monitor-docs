@@ -287,7 +287,7 @@ Maqueta 07.
 | AVISO | Intervalo incoherente | E2.5 | Historial |
 | AVISO | ¿Cargaste fuera de casa? | residuo positivo > `umbral_carga_externa_kwh` en el intervalo que termina en la última lectura | Carga externa |
 | AVISO | Objetivo por encima del tope | objetivo > `tope_pct` | Excepciones |
-| AVISO | Carga completa dudosa | sesión terminada por el coche (evsm) sin muestra en los 180 s siguientes o con un estado que no es 1, 2, 4 ni 8; solo las posteriores al último valor absoluto (E2.3) | Historial |
+| AVISO | Carga completa dudosa | sesión terminada por el coche (evsm) sin muestra en los 180 s siguientes o con un estado que no es 1, 2, 4 ni 8, con el muestreo ya en marcha (las anteriores a la primera muestra quedan como `sin_muestreo`, sin aviso); solo las posteriores al último valor absoluto (E2.3) | Historial |
 | INFO | Calibración sugerida | E2.6 | Parámetros |
 
 ### 7.8 Carga externa (`/carga-externa`)

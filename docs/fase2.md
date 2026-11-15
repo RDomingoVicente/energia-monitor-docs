@@ -212,7 +212,13 @@ Entrega:
    con tests (SQL frente a la referencia, también en las historias
    aleatorias con cargas externas). Pendiente: medir `recalcular_bateria`
    en el NAS con los datos reales.
-   3b. Servidor y pantallas (v0.5.3): pendiente.
+   Medido en el NAS el 15/11/2026 con los datos reales (103 eventos):
+   `recalcular_bateria` 44–52 ms, `v_bateria_estado` 12 ms, `v_aviso` 7 ms,
+   `actualizar_avisos()` 56 ms (330 ms la primera vez, al abrir 43 avisos).
+   v0.5.3 (migración 0017): cierre `sin_muestreo` para las sesiones
+   anteriores al muestreo (E2.3), que daban 42 falsos avisos de carga
+   completa dudosa en el NAS.
+   3b. Servidor y pantallas (v0.5.4): pendiente.
 4. Dashboard de batería (E2.10, segunda parte): pendiente.
 
 ### Objetivo
@@ -295,7 +301,10 @@ termina con origen `evsm` y el conector sigue conectado (estado 4 u 8) en la
 primera muestra posterior, dentro de los 180 s siguientes. Una sesión que
 termina con origen `schedman` es fin de franja, no carga completa (caso real:
 la sesión del 14/11/2026, de 03:00 a 06:00). Si falta la muestra posterior,
-no se registra el evento y el caso queda anotado como dudoso; mientras no han
+no se registra el evento y el caso queda anotado como dudoso, salvo que la
+sesión termine antes de la primera muestra del cargador: entonces no había
+muestreo y queda como `sin_muestreo`, sin aviso (0017; caso real: las 42
+sesiones del histórico entre el 21/09 y el 12/11/2026). Mientras no han
 pasado 180 s desde el fin, la sesión queda pendiente de evaluar. **Sin
 verificar con el coche**: la regla se desactiva con `detectar_carga_completa`.
 
@@ -404,7 +413,8 @@ muestras y los dos extremos del intervalo.
     última lectura, si no tiene cargas externas y el residuo (consumo
     estimado − consumo real) supera `umbral_carga_externa_kwh`;
   - objetivo por encima del tope, en cada salida de los próximos 7 días;
-  - carga completa dudosa (sesión sin muestra posterior, E2.3);
+  - carga completa dudosa (sesión sin muestra posterior con el muestreo ya en
+    marcha, E2.3);
   - factor sugerido distinto del vigente (E2.6, info).
 - `aviso_historial` guarda cuándo empieza y termina cada aviso; lo mantiene
   `actualizar_avisos()`, que llaman el muestreo cada minuto y cada recálculo.

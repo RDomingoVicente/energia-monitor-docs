@@ -876,3 +876,51 @@ def test_permisos_de_formulario_rw(conn: psycopg.Connection, nombre_bd: str, lim
                       "UPDATE contrato SET descripcion = descripcion"):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 rw.execute(orden)  # type: ignore[arg-type]
+
+
+# --- Sesiones anteriores al muestreo (0017) ----------------------------------------------------------
+
+
+def test_aviso_solo_de_la_sesion_dudosa_con_muestreo(conn: psycopg.Connection, limpio: None) -> None:
+    e, ahora = ESCENARIOS["sesiones_sin_muestreo"]()
+    comparar(conn, e, ahora)
+    dudosas = [a for a in bateria_servicio.avisos(conn, ahora) if a.clave.startswith("carga_completa_dudosa")]
+    assert [a.desde for a in dudosas] == [datetime(2026, 11, 16, 6, tzinfo=UTC)]
+
+
+def test_0017_borra_los_avisos_de_sesiones_sin_muestreo(tmp_path: Path) -> None:
+    """Base de datos aparte hasta la 0016 con las sesiones como en el NAS; después, la 0017."""
+    hasta_0016 = tmp_path / "migraciones"
+    hasta_0016.mkdir()
+    for f in sorted(MIGRACIONES.glob("*.sql")):
+        if f.name[:4] <= "0016":
+            (hasta_0016 / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    nombre = f"em_test_0017_{uuid.uuid4().hex[:8]}"
+    with psycopg.connect(autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{nombre}"')  # type: ignore[arg-type]
+    try:
+        with psycopg.connect(dbname=nombre, autocommit=True) as c:
+            db.migrar(c, hasta_0016)
+            # Dos sesiones evsm antes del muestreo, una después con hueco y el muestreo desde el 13/11.
+            c.execute(
+                "INSERT INTO cargador_sesion (conector, id, inicio, fin, energia_wh, origen_inicio, origen_fin, linea)"
+                " VALUES ('mennekes', 1, '2026-10-01 02:00Z', '2026-10-01 05:00Z', 9000, 'schedman', 'evsm', 'x'),"
+                "        ('mennekes', 2, '2026-11-12 02:00Z', '2026-11-12 04:00Z', 6000, 'schedman', 'evsm', 'x'),"
+                "        ('mennekes', 3, '2026-11-14 02:00Z', '2026-11-14 03:00Z', 3000, 'schedman', 'evsm', 'x')")
+            c.execute("INSERT INTO cargador_muestra (instante, intervalo_s, evse_w, home_w, total_w, estado)"
+                      " SELECT g, 60, 0, 300, 300, 4 FROM generate_series(timestamptz '2026-11-13 12:51Z',"
+                      " timestamptz '2026-11-14 02:59Z', interval '1 minute') g")
+            ahora = datetime(2026, 11, 14, 3, 30, tzinfo=UTC)
+            c.execute("SELECT recalcular_bateria(%s)", (ahora,))
+            c.execute("SELECT actualizar_avisos(%s)", (ahora,))
+            claves = {f[0] for f in c.execute("SELECT clave FROM aviso_historial")}
+            assert claves == {"cargador_no_accesible", "carga_completa_dudosa:mennekes:1",
+                              "carga_completa_dudosa:mennekes:2", "carga_completa_dudosa:mennekes:3", "sin_lecturas"}
+            assert db.migrar(c, MIGRACIONES)[0].startswith("0017")
+            assert c.execute("SELECT id, cierre FROM bateria_sesion ORDER BY id").fetchall() == [
+                (1, "sin_muestreo"), (2, "sin_muestreo"), (3, "dudoso")]
+            claves = {f[0] for f in c.execute("SELECT clave FROM aviso_historial")}
+            assert claves == {"cargador_no_accesible", "carga_completa_dudosa:mennekes:3", "sin_lecturas"}
+    finally:
+        with psycopg.connect(autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{nombre}" WITH (FORCE)')  # type: ignore[arg-type]

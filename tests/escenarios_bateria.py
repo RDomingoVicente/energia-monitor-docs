@@ -233,6 +233,20 @@ def fin_de_franja_y_dudosa() -> tuple[Entradas, datetime]:
 
 
 @escenario
+def sesiones_sin_muestreo() -> tuple[Entradas, datetime]:
+    # 0017. A termina sin ninguna muestra aún: sin_muestreo. B termina 1 min antes de la primera
+    # muestra, que llega en los 180 s: se clasifica por ella (libre: desconexión). C termina con el
+    # muestreo ya en marcha pero en un hueco: dudoso.
+    c = (Constructor().estado(t(-10), 4).lectura(t(-1), 40)
+         .sesion(t(0), t(1), 3000, origen_fin="evsm")
+         .sesion(t(2), t(4) - MIN, 3000, origen_fin="evsm")
+         .muestras(t(4) - MIN, t(6), 0, 1)
+         .sesion(t(5), t(6), 3000, origen_fin="evsm")
+         .muestras(t(7), t(8), 0, 4))
+    return c.e, t(8)
+
+
+@escenario
 def calibracion() -> tuple[Entradas, datetime]:
     c = (Constructor().estado(t(-10), 4).lectura(t(0), 20)
          .muestras(t(0), t(2), 0, 4)

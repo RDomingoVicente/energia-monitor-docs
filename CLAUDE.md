@@ -33,8 +33,9 @@ Antes de cualquier cambio, leer:
   excepciones `con_salida`/`sin_salida` (validación en
   `bateria_servicio.registrar_excepcion`). Paso 3a hecho (v0.5.2): migración 0016 (confianza,
   cargas externas, avisos con historial, rangos de parámetros, rol
-  `formulario_rw`) y CLI `bateria carga-externa`. Paso 3b (servidor y
-  pantallas, v0.5.3) pendiente. La etapa 3 no se empieza hasta nuevo aviso.
+  `formulario_rw`) y CLI `bateria carga-externa`. v0.5.3: migración 0017,
+  cierre `sin_muestreo` para sesiones anteriores al muestreo. Paso 3b
+  (servidor y pantallas, v0.5.4) pendiente. La etapa 3 no se empieza hasta nuevo aviso.
 
 ## Estructura
 
@@ -64,7 +65,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0017).
+  migración nueva (la siguiente es la 0018).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de

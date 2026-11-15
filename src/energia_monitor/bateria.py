@@ -1,4 +1,4 @@
-"""Referencia en Python del nivel de batería y la previsión (migraciones 0014 a 0016).
+"""Referencia en Python del nivel de batería y la previsión (migraciones 0014 a 0017).
 
 El servicio calcula en PostgreSQL (recalcular_bateria y las funciones
 bateria_*). Este módulo replica el mismo algoritmo con Decimal para validar
@@ -309,6 +309,8 @@ def clasificar_sesiones(e: Entradas, ahora: datetime) -> list[SesionClasificada]
                 cierre = "carga_completa"
             elif estado in LIBRE:
                 cierre = "desconexion"
+            elif siguiente is None and (not muestras or s.fin < muestras[0].instante):
+                cierre = "sin_muestreo"  # 0017: terminó antes de que empezara el muestreo
             else:
                 cierre = "dudoso"
         salida.append(SesionClasificada(s.conector, s.id, s.inicio, s.fin, s.energia_wh,
