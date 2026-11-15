@@ -15,6 +15,7 @@ from decimal import Decimal as D
 
 from energia_monitor.bateria import (
     CambioEstado,
+    CargaExterna,
     Entradas,
     Excepcion,
     Lectura,
@@ -39,6 +40,7 @@ class Constructor:
 
     e: Entradas = field(default_factory=Entradas)
     _id_lectura: int = 0
+    _id_externa: int = 0
 
     def lectura(self, instante: datetime, pct: str | int) -> Constructor:
         self._id_lectura += 1
@@ -78,6 +80,11 @@ class Constructor:
 
     def muestra(self, instante: datetime, estado: int | None, potencia_w: str | int = 0) -> Constructor:
         self.e.muestras.append(MuestraEstado(instante, 60, D(potencia_w), estado))
+        return self
+
+    def carga_externa(self, instante: datetime, kwh: str | int | None) -> Constructor:
+        self._id_externa += 1
+        self.e.cargas_externas.append(CargaExterna(self._id_externa, instante, None if kwh is None else D(kwh)))
         return self
 
     def excepcion(self, x: Excepcion) -> Constructor:
@@ -299,6 +306,88 @@ def excepcion_normal_cuenta_para_el_p75() -> tuple[Entradas, datetime]:
     return c.e, t(42)
 
 
+# --- Confianza del nivel y cargas externas (0016) ---------------------------------------------
+
+
+@escenario
+def confianza_leido() -> tuple[Entradas, datetime]:
+    c = Constructor().estado(t(-10), 4).lectura(t(1), 50).muestras(t(0), t(3), 0, 4)
+    return c.e, t(3)
+
+
+@escenario
+def confianza_leido_carga() -> tuple[Entradas, datetime]:
+    c = (Constructor().estado(t(-10), 4).lectura(t(1), 50)
+         .sesion(t(2), t(4), 10000, "schedman", 5000))
+    return c.e, t(5)
+
+
+@escenario
+def confianza_carga_en_curso() -> tuple[Entradas, datetime]:
+    # Sin sesión cerrada aún: solo la energía pendiente de las muestras.
+    c = Constructor().estado(t(-10), 4).lectura(t(1), 50).estado(t(2), 6).muestras(t(2), t(3), 4000, 6)
+    return c.e, t(3)
+
+
+@escenario
+def confianza_estimado_tras_trayecto() -> tuple[Entradas, datetime]:
+    c = (Constructor().estado(t(-10), 4).lectura(t(1), 50)
+         .sesion(t(2), t(4), 10000, "schedman", 5000)
+         .trayecto(t(6), t(8)))
+    return c.e, t(9)
+
+
+@escenario
+def confianza_desconexion_corta() -> tuple[Entradas, datetime]:
+    # Una desconexión corta no consume: sigue leído.
+    c = Constructor().estado(t(-10), 4).lectura(t(1), 50).trayecto(t(2), t(2) + 10 * MIN)
+    return c.e, t(3)
+
+
+@escenario
+def confianza_tras_carga_completa() -> tuple[Entradas, datetime]:
+    c = (Constructor().estado(t(-10), 4).lectura(t(1), 50)
+         .sesion(t(2), t(4), 30000, "evsm", 7000).muestra(t(4) + MIN, 4))
+    return c.e, t(5)
+
+
+@escenario
+def confianza_secuencia() -> tuple[Entradas, datetime]:
+    # Lectura → carga → trayecto → lectura: vuelve a leído.
+    # Con muestras continuas (sin huecos): la segunda lectura es comparable en el historial.
+    c = (Constructor().estado(t(-10), 4).lectura(t(1), 40)
+         .sesion(t(2), t(4), 20000, "schedman", 7000)
+         .trayecto(t(6), t(8)).lectura(t(9), 42)
+         .muestras(t(0), t(10)))
+    return c.e, t(10)
+
+
+@escenario
+def externa_con_kwh() -> tuple[Entradas, datetime]:
+    # 30 kWh × 0,86 = 25,8 kWh cargados fuera. Lectura final coherente: el trayecto consumió
+    # 20 % + 25,8 kWh − 35 % = 12,105 kWh.
+    c = (Constructor().estado(t(-10), 4).lectura(t(1), 20)
+         .trayecto(t(2), t(10)).carga_externa(t(5), 30)
+         .lectura(t(11), 35))
+    return c.e, t(12)
+
+
+@escenario
+def externa_sin_kwh() -> tuple[Entradas, datetime]:
+    c = (Constructor().estado(t(-10), 4).lectura(t(1), 20)
+         .trayecto(t(2), t(10)).carga_externa(t(5), None)
+         .lectura(t(11), 60))
+    return c.e, t(12)
+
+
+@escenario
+def residuo_sin_carga_externa() -> tuple[Entradas, datetime]:
+    # Sin cargas externas registradas: el nivel sube de 20 % a 60 % con un trayecto (residuo).
+    c = (Constructor().estado(t(-10), 4).lectura(t(1), 20)
+         .trayecto(t(2), t(10)).lectura(t(11), 60))
+    return c.e, t(12)
+
+
 @escenario
 def coche_fuera() -> tuple[Entradas, datetime]:
     c = (Constructor().estado(t(-10), 4).lectura(t(1), 50)
@@ -310,6 +399,7 @@ def coche_fuera() -> tuple[Entradas, datetime]:
 def aleatorio(semilla: int) -> tuple[Entradas, datetime]:
     """Historia de varios días con enchufes, cargas, salidas y lecturas al azar."""
     rnd = random.Random(semilla)
+    rnd_externa = random.Random(semilla + 1000)  # aparte: no cambia las historias de antes de 0016
     c = Constructor()
     instante = T0 + timedelta(minutes=rnd.randrange(0, 600))
     c.estado(instante - H, 4)
@@ -329,6 +419,10 @@ def aleatorio(semilla: int) -> tuple[Entradas, datetime]:
         elif conectado and accion < 0.6:
             c.estado(instante, rnd.choice([1, 2]))
             conectado = False
+            if rnd_externa.random() < 0.3:
+                # Carga fuera de casa durante el trayecto (el siguiente cambio llega 10 min después o más).
+                kwh = None if rnd_externa.random() < 0.35 else rnd_externa.randrange(5, 40)
+                c.carga_externa(instante + timedelta(minutes=rnd_externa.randrange(2, 9)), kwh)
         elif not conectado and accion < 0.7:
             c.estado(instante, rnd.choice([3, 4, 7]))
             conectado = True

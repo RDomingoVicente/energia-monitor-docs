@@ -31,12 +31,14 @@ class ErrorExcepcion(Exception):
 
 
 def recalcular(conn: psycopg.Connection, ahora: datetime | None = None) -> int:
-    """recalcular_bateria(): rehace eventos, trayectos e intervalos. Devuelve cuántos eventos hay."""
+    """recalcular_bateria() y actualizar_avisos(): rehace eventos, trayectos e intervalos y abre o
+    cierra los avisos del historial. Devuelve cuántos eventos hay."""
     if ahora is None:
         fila = conn.execute("SELECT recalcular_bateria()").fetchone()
     else:
         fila = conn.execute("SELECT recalcular_bateria(%s)", (ahora,)).fetchone()
     assert fila is not None
+    actualizar_avisos(conn, ahora)
     return int(fila[0])
 
 
@@ -92,6 +94,14 @@ def registrar_lectura(conn: psycopg.Connection, *, instante: datetime, pct: Deci
         raise ErrorLectura(f"ya hay una lectura el {_local(instante)}; anúlala o elige otra hora") from e
     assert fila is not None
     return int(fila[0])
+
+
+def actualizar_avisos_sin_fallar(conn: psycopg.Connection) -> None:
+    """Para el muestreo, en cada ciclo: un fallo se registra y no detiene el servicio."""
+    try:
+        actualizar_avisos(conn)
+    except Exception:
+        log.exception("fallo al actualizar los avisos; se reintentará en el siguiente ciclo")
 
 
 # --- Excepciones (E2.7, 0015) -------------------------------------------------------------
@@ -186,6 +196,96 @@ def modificar_excepcion(conn: psycopg.Connection, id_: int, x: NuevaExcepcion, a
     return nuevo
 
 
+# --- Cargas externas (0016) --------------------------------------------------------------------
+
+
+class ErrorCargaExterna(Exception):
+    """Carga externa no válida; el formulario la devuelve como 422 con este mensaje."""
+
+
+@dataclass(frozen=True)
+class NuevaCargaExterna:
+    instante: datetime
+    kwh: Decimal | None = None
+    coste_eur: Decimal | None = None
+    nota: str | None = None
+
+
+def _validar_carga_externa(conn: psycopg.Connection, x: NuevaCargaExterna, ahora: datetime) -> None:
+    if x.instante > ahora:
+        raise ErrorCargaExterna(f"la carga externa no puede ser futura ({_local(x.instante)})")
+    if x.kwh is not None and not Decimal(0) <= x.kwh <= Decimal(150):
+        raise ErrorCargaExterna(f"energía fuera de 0 a 150 kWh: {x.kwh}")
+    if x.coste_eur is not None and x.coste_eur < 0:
+        raise ErrorCargaExterna(f"coste negativo: {x.coste_eur}")
+    # Desconectado de casa: el último estado del conector hasta ese instante es libre (1, 2) y antes
+    # estuvo conectado (como un trayecto, E2.4). Se mira cargador_estado, no bateria_trayecto, para no
+    # depender de un recálculo.
+    fila = conn.execute(
+        "SELECT estado FROM cargador_estado WHERE detectado_en <= %s AND estado BETWEEN 1 AND 8"
+        " ORDER BY detectado_en DESC LIMIT 1", (x.instante,)).fetchone()
+    antes = conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM cargador_estado WHERE detectado_en < %s AND estado BETWEEN 3 AND 8)",
+        (x.instante,)).fetchone()
+    if fila is None or fila[0] not in (1, 2) or not (antes and antes[0]):
+        raise ErrorCargaExterna("A esa hora el coche estaba conectado en casa")
+
+
+def _insertar_carga_externa(conn: psycopg.Connection, x: NuevaCargaExterna, origen: str, ahora: datetime,
+                            corrige: int | None = None) -> int:
+    _validar_carga_externa(conn, x, ahora)
+    try:
+        with conn.transaction():
+            fila = conn.execute(
+                "INSERT INTO bateria_carga_externa (instante, kwh, coste_eur, nota, origen, corrige)"
+                " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (x.instante, x.kwh, x.coste_eur, x.nota, origen, corrige),
+            ).fetchone()
+    except psycopg.errors.UniqueViolation as e:
+        raise ErrorCargaExterna(f"ya hay una carga externa el {_local(x.instante)}") from e
+    except psycopg.errors.CheckViolation as e:
+        raise ErrorCargaExterna(f"carga externa no válida: {e.diag.constraint_name}") from e
+    assert fila is not None
+    return int(fila[0])
+
+
+def registrar_carga_externa(conn: psycopg.Connection, x: NuevaCargaExterna, origen: str,
+                            ahora: datetime | None = None) -> int:
+    """Alta de una carga fuera de casa y recálculo, en una transacción. Devuelve su id."""
+    ahora = ahora or datetime.now(UTC)
+    with conn.transaction():
+        id_ = _insertar_carga_externa(conn, x, origen, ahora)
+        recalcular(conn, ahora)
+    return id_
+
+
+def _anular_carga(conn: psycopg.Connection, id_: int, motivo: str) -> None:
+    if not motivo.strip():
+        raise ErrorCargaExterna("anular exige un motivo")
+    fila = conn.execute("UPDATE bateria_carga_externa SET anulada_en = now(), motivo = %s"
+                        " WHERE id = %s AND anulada_en IS NULL RETURNING id", (motivo, id_)).fetchone()
+    if fila is None:
+        raise ErrorCargaExterna(f"no hay ninguna carga externa activa con id {id_}")
+
+
+def anular_carga_externa(conn: psycopg.Connection, id_: int, motivo: str, ahora: datetime | None = None) -> None:
+    with conn.transaction():
+        _anular_carga(conn, id_, motivo)
+        recalcular(conn, ahora)
+
+
+def corregir_carga_externa(conn: psycopg.Connection, id_: int, x: NuevaCargaExterna, origen: str,
+                           ahora: datetime | None = None) -> int:
+    """Corregir: anula la anterior con motivo «corregida» y da de alta la nueva (corrige = id), en una
+    transacción. Si el alta falla, la anterior sigue activa. Devuelve el id nuevo."""
+    ahora = ahora or datetime.now(UTC)
+    with conn.transaction():
+        _anular_carga(conn, id_, "corregida")
+        nuevo = _insertar_carga_externa(conn, x, origen, ahora, corrige=id_)
+        recalcular(conn, ahora)
+    return nuevo
+
+
 # --- Texto de `bateria estado` -----------------------------------------------------------
 
 
@@ -220,7 +320,7 @@ def estado(conn: psycopg.Connection, ahora: datetime) -> list[str]:
     else:
         origen = "lectura" if e["ultimo_absoluto_tipo"] == "lectura" else "carga completa"
         lineas.append(
-            f"Batería: {e['nivel_pct']:.0f} % ({_kwh(e['nivel_kwh'])}) estimado"
+            f"Batería: {e['nivel_pct']:.0f} % ({_kwh(e['nivel_kwh'])}) {CONFIANZA[e['confianza']]}"
             f"{' (dudoso)' if e['dudoso'] else ''}; último valor absoluto: {origen} del"
             f" {_local(e['ultimo_absoluto'])} (hace {_hace(ahora - e['ultimo_absoluto'])}),"
             f" {e['trayectos_desde']} trayecto(s) estimado(s) desde entonces"
@@ -245,5 +345,34 @@ def estado(conn: psycopg.Connection, ahora: datetime) -> list[str]:
     sugerido = (f"; sugerido {e['factor_sugerido']:.3f} ({e['observaciones_factor']} observación(es))"
                 if e["factor_sugerido"] is not None else "; sin observaciones para sugerir otro")
     lineas.append(f"Factor de batería: vigente {e['factor_vigente']}{sugerido}")
-    lineas.extend(f"{AVISO} {a}" for a in e["avisos"])
+    lineas.extend(f"{AVISO} [{a.nivel}] {a.titulo}: {a.detalle}" for a in avisos(conn, ahora))
     return lineas
+
+
+CONFIANZA = {"leido": "LEÍDO", "leido_carga": "LEÍDO + CARGA", "estimado": "ESTIMADO"}
+
+
+@dataclass(frozen=True)
+class Aviso:
+    clave: str
+    nivel: str  # error, aviso o info
+    titulo: str
+    detalle: str
+    desde: datetime | None
+    regla: str
+    accion: str | None
+
+
+def avisos(conn: psycopg.Connection, ahora: datetime) -> list[Aviso]:
+    """bateria_avisos(): los avisos activos (catálogo de formulario-maquetas.md, 7.7)."""
+    return [Aviso(*f) for f in conn.execute("SELECT * FROM bateria_avisos(%s)", (ahora,))]
+
+
+def actualizar_avisos(conn: psycopg.Connection, ahora: datetime | None = None) -> int:
+    """actualizar_avisos(): abre y cierra filas de aviso_historial. Devuelve los activos."""
+    if ahora is None:
+        fila = conn.execute("SELECT actualizar_avisos()").fetchone()
+    else:
+        fila = conn.execute("SELECT actualizar_avisos(%s)", (ahora,)).fetchone()
+    assert fila is not None
+    return int(fila[0])

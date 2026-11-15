@@ -215,6 +215,9 @@ class Muestreador:
             bateria_servicio.recalcular_sin_fallar(conn, "cambio de estado del conector")
         if self.ultimo_historico is None or instante - self.ultimo_historico >= INTERVALO_HISTORICO:
             self.leer_historico(conn, instante)
+        # Avisos (0016): «Cargador no accesible», «Sin lecturas»... se abren y cierran en aviso_historial
+        # aunque no cambie nada más.
+        bateria_servicio.actualizar_avisos_sin_fallar(conn)
 
     def leer_historico(self, conn: psycopg.Connection, instante: datetime) -> None:
         try:

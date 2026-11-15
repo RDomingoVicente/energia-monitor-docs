@@ -32,7 +32,10 @@
 - bateria lectura --pct N [--instante "AAAA-MM-DD HH:MM"] [--nota TEXTO]:
   lectura del nivel (hora de Madrid; por defecto, ahora) y recálculo.
 - bateria recalcular: rehace el nivel, los trayectos y la reconciliación
-  (tras cambiar por SQL lecturas, excepciones o datos del cargador).
+  (tras cambiar por SQL lecturas, excepciones o datos del cargador) y
+  muestra cuánto ha tardado.
+- bateria carga-externa [--kwh N] [--coste EUR] [--instante "AAAA-MM-DD HH:MM"]
+  [--nota TEXTO]: carga fuera de casa (con el coche desconectado) y recálculo.
 
 recargar, esios recargar, esios estimar y parametro registrar (de contrato)
 refrescan mv_precio_final al terminar.
@@ -124,6 +127,11 @@ def _parser() -> argparse.ArgumentParser:
     lectura.add_argument("--instante", help="AAAA-MM-DD HH:MM, hora de Madrid (por defecto, ahora)")
     lectura.add_argument("--nota")
     sub_bateria.add_parser("recalcular", help="rehace nivel, trayectos y reconciliación")
+    externa = sub_bateria.add_parser("carga-externa", help="registra una carga fuera de casa y recalcula")
+    externa.add_argument("--kwh", type=Decimal, help="energía cargada (opcional, 0 a 150)")
+    externa.add_argument("--coste", type=Decimal, help="coste en € (opcional)")
+    externa.add_argument("--instante", help="AAAA-MM-DD HH:MM, hora de Madrid (por defecto, ahora)")
+    externa.add_argument("--nota")
     return parser
 
 
@@ -160,8 +168,23 @@ def _bateria(args: argparse.Namespace) -> int:
     with db.conectar() as conn:
         if args.accion == "recalcular":
             n = bateria_servicio.recalcular(conn)
-            print(f"batería recalculada: {n} evento(s)")
+            fila = conn.execute("SELECT duracion_ms FROM bateria_recalculo").fetchone()
+            duracion = f" en {fila[0]:.0f} ms" if fila else ""
+            print(f"batería recalculada: {n} evento(s){duracion}")
             return 0
+        if args.accion == "carga-externa":
+            try:
+                if args.instante:
+                    instante = bateria_servicio.instante_local(args.instante).instante
+                else:
+                    instante = ahora.replace(second=0, microsecond=0)
+                ident = bateria_servicio.registrar_carga_externa(
+                    conn, bateria_servicio.NuevaCargaExterna(instante, args.kwh, args.coste, args.nota), "cli", ahora)
+            except (bateria_servicio.ErrorLectura, bateria_servicio.ErrorCargaExterna) as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
+            kwh = "sin kWh" if args.kwh is None else f"{args.kwh} kWh"
+            print(f"carga externa {ident} registrada: {kwh}")
         if args.accion == "lectura":
             try:
                 if args.instante:
@@ -180,7 +203,7 @@ def _bateria(args: argparse.Namespace) -> int:
         lineas = bateria_servicio.estado(conn, ahora)
     for linea in lineas:
         print(linea)
-    if args.accion == "lectura":
+    if args.accion in ("lectura", "carga-externa"):
         return 0
     return 1 if any(linea.startswith(bateria_servicio.AVISO) for linea in lineas) else 0
 

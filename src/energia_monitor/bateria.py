@@ -1,4 +1,4 @@
-"""Referencia en Python del nivel de batería y la previsión (migración 0014).
+"""Referencia en Python del nivel de batería y la previsión (migraciones 0014 a 0016).
 
 El servicio calcula en PostgreSQL (recalcular_bateria y las funciones
 bateria_*). Este módulo replica el mismo algoritmo con Decimal para validar
@@ -11,10 +11,11 @@ Resumen del algoritmo:
 2. Trayectos: de conectado (3..8) a libre (1, 2) y vuelta, según los cambios
    de estado.
 3. Eventos: sesiones (en su fin), cargas completas, trayectos (en su
-   llegada) y lecturas. Una sesión o un trayecto que contiene un valor
-   absoluto se parte en él: la sesión por la energía del modulador y el
-   trayecto por tiempo. Orden: (instante, orden, ref) con orden 1 sesión,
-   2 carga completa, 3 trayecto y 4 lectura.
+   llegada), cargas externas y lecturas. Una sesión o un trayecto que
+   contiene un valor absoluto se parte en él: la sesión por la energía del
+   modulador y el trayecto por tiempo. Un trayecto también se parte en cada
+   carga externa (0016). Orden: (instante, orden, ref) con orden 1 sesión,
+   2 carga completa, 3 trayecto, 4 carga externa y 5 lectura.
 4. Primera pasada, con consumos estimados: nivel previsto y, al llegar a
    cada valor absoluto, reconciliación del intervalo que cierra.
 5. Segunda pasada: nivel con los consumos reconciliados.
@@ -38,7 +39,7 @@ SEG_HORA = Decimal(3600)
 MARGEN_CARGA_COMPLETA = timedelta(seconds=180)
 CONECTADO = range(3, 9)
 LIBRE = (1, 2)
-ORDEN = {"sesion": 1, "carga_completa": 2, "trayecto": 3, "lectura": 4}
+ORDEN = {"sesion": 1, "carga_completa": 2, "trayecto": 3, "carga_externa": 4, "lectura": 5}
 
 # Valores iniciales de la migración 0014, vigentes desde el 1/1/2025.
 PARAMETROS_INICIALES: dict[str, Decimal] = {
@@ -56,6 +57,7 @@ PARAMETROS_INICIALES: dict[str, Decimal] = {
     "detectar_carga_completa": Decimal(1),
     "aviso_sin_lectura_dias": Decimal(7),
     "hueco_muestreo_aviso_s": Decimal(1800),
+    "umbral_carga_externa_kwh": Decimal(5),  # 0016
 }
 
 
@@ -96,6 +98,15 @@ class Lectura:
     id: int
     instante: datetime
     pct: Decimal
+
+
+@dataclass(frozen=True)
+class CargaExterna:
+    """bateria_carga_externa (0016); kwh None si no se sabe."""
+
+    id: int
+    instante: datetime
+    kwh: Decimal | None
 
 
 @dataclass(frozen=True)
@@ -150,6 +161,7 @@ class Entradas:
     estados: list[CambioEstado] = field(default_factory=list)
     excepciones: list[Excepcion] = field(default_factory=list)  # solo las activas
     horario: dict[int, time | None] = field(default_factory=dict)  # 1 = lunes
+    cargas_externas: list[CargaExterna] = field(default_factory=list)  # solo las activas
 
 
 # --- Salidas -------------------------------------------------------------------------------
@@ -189,6 +201,7 @@ class Evento:
     sesion_id: int | None = None
     trayecto_salida: datetime | None = None
     lectura_id: int | None = None
+    carga_externa_id: int | None = None
     peso: Decimal | None = None
     contador_kwh: Decimal | None = None
     absoluto_kwh: Decimal | None = None
@@ -216,6 +229,8 @@ class Intervalo:
     estado: str
     huecos: bool
     factor_observado: Decimal | None
+    cargas_externas: int = 0
+    externa_kwh: Decimal = CERO  # con factor_bateria; las cargas sin kWh no suman
 
 
 @dataclass
@@ -343,7 +358,9 @@ def construir_eventos(e: Entradas, sesiones: list[SesionClasificada], trayectos:
                       ahora: datetime) -> list[Evento]:
     p = e.parametros
     lecturas = [lec for lec in e.lecturas if lec.instante <= ahora]
+    externas = [x for x in e.cargas_externas if x.instante <= ahora]
     cortes = sorted({lec.instante for lec in lecturas} | {s.fin for s in sesiones if s.cierre == "carga_completa"})
+    cortes_trayecto = sorted(set(cortes) | {x.instante for x in externas})
     eventos: list[Evento] = []
     for s in sesiones:
         puntos = [s.inicio] + [c for c in cortes if s.inicio < c < s.fin] + [s.fin]
@@ -361,7 +378,7 @@ def construir_eventos(e: Entradas, sesiones: list[SesionClasificada], trayectos:
                                   peso=w, contador_kwh=s.energia_wh / MIL * w,
                                   delta_estimado_kwh=s.energia_wh / MIL * s.factor * w))
     for t in trayectos:
-        puntos = [t.salida] + [c for c in cortes if c > t.salida and (t.llegada is None or c < t.llegada)]
+        puntos = [t.salida] + [c for c in cortes_trayecto if c > t.salida and (t.llegada is None or c < t.llegada)]
         if t.llegada is not None:
             puntos.append(t.llegada)
         for a, b in zip(puntos, puntos[1:]):
@@ -372,8 +389,12 @@ def construir_eventos(e: Entradas, sesiones: list[SesionClasificada], trayectos:
             eventos.append(Evento(s.fin, 2, f"carga_completa:{s.conector}:{s.id}", "carga_completa", s.conector,
                                   s.id, absoluto_kwh=p.valor("tope_pct", s.fin) / CIEN
                                   * p.valor("capacidad_util_kwh", s.fin)))
+    for x in externas:
+        eventos.append(Evento(x.instante, 4, f"carga_externa:{x.id}", "carga_externa", carga_externa_id=x.id,
+                              delta_estimado_kwh=None if x.kwh is None
+                              else x.kwh * p.valor("factor_bateria", x.instante)))
     for lec in lecturas:
-        eventos.append(Evento(lec.instante, 4, f"lectura:{lec.id}", "lectura", lectura_id=lec.id,
+        eventos.append(Evento(lec.instante, 5, f"lectura:{lec.id}", "lectura", lectura_id=lec.id,
                               absoluto_kwh=lec.pct / CIEN * p.valor("capacidad_util_kwh", lec.instante)))
     eventos.sort(key=lambda ev: (ev.instante, ev.orden, ev.ref))
     for i, ev in enumerate(eventos, 1):
@@ -422,7 +443,8 @@ def recalcular(e: Entradas, ahora: datetime) -> Resultado:
     # Primera pasada.
     nivel: Decimal | None = None
     a1: Evento | None = None
-    s_kwh = c_kwh = CERO
+    s_kwh = c_kwh = x_kwh = CERO
+    externas = sin_kwh = 0
     for ev in eventos:
         cap = p.valor("capacidad_util_kwh", ev.instante)
         if ev.tipo == "sesion":
@@ -432,6 +454,16 @@ def recalcular(e: Entradas, ahora: datetime) -> Resultado:
             if a1 is not None:
                 s_kwh += ev.delta_estimado_kwh
                 c_kwh += ev.contador_kwh
+            ev.nivel_estimado_kwh = nivel
+        elif ev.tipo == "carga_externa":
+            if ev.delta_estimado_kwh is not None and nivel is not None:
+                nivel = _acotar(nivel + ev.delta_estimado_kwh, cap)
+            if a1 is not None:
+                externas += 1
+                if ev.delta_estimado_kwh is None:
+                    sin_kwh += 1
+                else:
+                    x_kwh += ev.delta_estimado_kwh
             ev.nivel_estimado_kwh = nivel
         elif ev.tipo == "trayecto":
             assert ev.peso is not None and ev.trayecto_salida is not None and ev.conector is not None
@@ -449,10 +481,12 @@ def recalcular(e: Entradas, ahora: datetime) -> Resultado:
             ev.nivel_estimado_kwh = ev.absoluto_kwh
             if a1 is not None:
                 assert a1.absoluto_kwh is not None
-                intervalos.append(_reconciliar(e, a1, ev, eventos, por_clave, s_kwh, c_kwh, cap))
+                intervalos.append(_reconciliar(e, a1, ev, eventos, por_clave, s_kwh, c_kwh, cap,
+                                               externas, sin_kwh, x_kwh))
             nivel = ev.absoluto_kwh
             a1 = ev
-            s_kwh = c_kwh = CERO
+            s_kwh = c_kwh = x_kwh = CERO
+            externas = sin_kwh = 0
 
     for t in trayectos:
         if t.consumo_estimado_kwh is None:
@@ -467,8 +501,8 @@ def recalcular(e: Entradas, ahora: datetime) -> Resultado:
         else:
             if ev.delta_kwh is None:
                 ev.delta_kwh = ev.delta_estimado_kwh
-            assert ev.delta_kwh is not None
-            if nivel is not None:
+            # Solo una carga externa sin kWh queda sin delta: no cambia el nivel.
+            if ev.delta_kwh is not None and nivel is not None:
                 nivel = _acotar(nivel + ev.delta_kwh, cap)
         ev.nivel_kwh = nivel
         ev.nivel_pct = None if nivel is None else nivel / cap * CIEN
@@ -483,24 +517,28 @@ def recalcular(e: Entradas, ahora: datetime) -> Resultado:
 
 def _reconciliar(e: Entradas, a1: Evento, a2: Evento, eventos: list[Evento],
                  por_clave: dict[tuple[str, datetime], Trayecto], s_kwh: Decimal, c_kwh: Decimal,
-                 cap: Decimal) -> Intervalo:
+                 cap: Decimal, externas: int, sin_kwh: int, x_kwh: Decimal) -> Intervalo:
     p = e.parametros
     assert a1.absoluto_kwh is not None and a2.absoluto_kwh is not None
     partes = [ev for ev in eventos if ev.tipo == "trayecto" and a1.n < ev.n < a2.n]
     largas = [ev for ev in partes if not por_clave[(ev.conector, ev.trayecto_salida)].corto]  # type: ignore[index]
     cortas = len(partes) - len(largas)
     est = sum((-ev.delta_estimado_kwh for ev in largas), CERO)  # type: ignore[operator]
-    real = a1.absoluto_kwh + s_kwh - a2.absoluto_kwh
+    real = a1.absoluto_kwh + s_kwh + x_kwh - a2.absoluto_kwh
     huecos = hay_hueco(e.muestras, a1.instante, a2.instante, p.valor("hueco_muestreo_aviso_s", a2.instante))
     factor = None
-    if not largas:
+    if sin_kwh:
+        # Carga externa sin kWh (0016): no se reparte nada ni se marca incoherente; sus trayectos
+        # se quedan sin reconciliar y por eso fuera de la mediana y del P75.
+        estado = "carga_externa_sin_kwh"
+    elif not largas:
         # Sin trayectos que repartir. Con carga, la diferencia es error del factor (E2.6), no
         # incoherencia; sin carga, el nivel no puede subir.
         if real > cap or (c_kwh == 0 and real < 0):
             estado = "incoherente"
         else:
             estado = "sin_trayectos"
-            if (cortas == 0 and not huecos and c_kwh > 0
+            if (cortas == 0 and not huecos and externas == 0 and c_kwh > 0
                     and c_kwh >= p.valor("energia_min_calibracion_kwh", a2.instante)):
                 observado = (a2.absoluto_kwh - a1.absoluto_kwh) / c_kwh
                 if 0 < observado <= 1:
@@ -521,7 +559,7 @@ def _reconciliar(e: Entradas, a1: Evento, a2: Evento, eventos: list[Evento],
                 tr.reconciliado_en = a2.instante
                 tr.consumo_kwh = sum((-ev.delta_kwh for ev in todas), CERO)  # type: ignore[operator]
     return Intervalo(a1.instante, a2.instante, a1.absoluto_kwh, a2.absoluto_kwh, s_kwh, c_kwh, len(largas),
-                     cortas, est, real, estado, huecos, factor)
+                     cortas, est, real, estado, huecos, factor, externas, x_kwh)
 
 
 # --- Previsión -----------------------------------------------------------------------------
@@ -550,6 +588,9 @@ class Salida:
     consumo_modo: str  # normal o indicado
     pct_objetivo: Decimal | None
     consumo_declarado_kwh: Decimal | None
+    consumo_previsto_kwh: Decimal  # el declarado o, en modo normal, el P75 de bateria_consumo_plan(desde)
+    objetivo_kwh: Decimal  # min(tope, objetivo_sin_tope_kwh)
+    objetivo_sin_tope_kwh: Decimal  # max(reserva + consumo previsto, pct_objetivo), en kWh
 
 
 def consumo_declarado(p: Parametros, x: Excepcion, instante: datetime) -> Decimal:
@@ -560,9 +601,14 @@ def consumo_declarado(p: Parametros, x: Excepcion, instante: datetime) -> Decima
     return x.km * p.valor("consumo_kwh_100km", instante) / CIEN
 
 
-def salidas(e: Entradas, desde: datetime, dias: int) -> list[Salida]:
-    """bateria_salidas(): horario semanal y excepciones, del día local de desde a dias días después."""
+def salidas(e: Entradas, desde: datetime, dias: int, trayectos: Iterable[Trayecto]) -> list[Salida]:
+    """bateria_salidas(): horario semanal y excepciones, del día local de desde a dias días después.
+
+    Objetivo de cada salida = min(tope, max(reserva + consumo previsto, pct_objetivo)), con los
+    parámetros vigentes el día de la salida.
+    """
     p = e.parametros
+    plan, _, _ = consumo_plan(e, trayectos, desde)
     hoy = dia_local(desde)
     excepciones = {x.fecha: x for x in e.excepciones}
     resultado = []
@@ -577,12 +623,18 @@ def salidas(e: Entradas, desde: datetime, dias: int) -> list[Salida]:
         instante = local_a_utc(d, hora)
         if instante <= desde:
             continue
-        if x is None:
-            resultado.append(Salida(d, instante, "horario", "normal", None, None))
-            continue
-        assert x.consumo_modo is not None
-        declarado = consumo_declarado(p, x, instante) if x.indicado else None
-        resultado.append(Salida(d, instante, x.tipo, x.consumo_modo, x.pct_objetivo, declarado))
+        tipo, modo, pct_objetivo, declarado = "horario", "normal", None, None
+        if x is not None:
+            assert x.consumo_modo is not None
+            tipo, modo, pct_objetivo = x.tipo, x.consumo_modo, x.pct_objetivo
+            declarado = consumo_declarado(p, x, instante) if x.indicado else None
+        previsto = declarado if declarado is not None else plan
+        cap = p.valor("capacidad_util_kwh", instante)
+        sin_tope = p.valor("reserva_pct", instante) / CIEN * cap + previsto
+        if pct_objetivo is not None:
+            sin_tope = max(sin_tope, pct_objetivo / CIEN * cap)
+        objetivo = min(sin_tope, p.valor("tope_pct", instante) / CIEN * cap)
+        resultado.append(Salida(d, instante, tipo, modo, pct_objetivo, declarado, previsto, objetivo, sin_tope))
     return sorted(resultado, key=lambda s: s.salida)
 
 
@@ -640,6 +692,14 @@ class Estado:
     proxima_salida: datetime | None
     consumo_plan_kwh: Decimal | None
     energia_necesaria_kwh: Decimal | None
+    # 0016
+    confianza: str = "estimado"  # leido, leido_carga o estimado
+    ultima_lectura_ts: datetime | None = None
+    ultima_lectura_pct: Decimal | None = None
+    kwh_cargados_desde_lectura: Decimal | None = None
+    trayectos_desde_lectura: int | None = None
+    kwh_trayectos_desde_lectura: Decimal | None = None
+    objetivo_kwh: Decimal | None = None
 
 
 def estado(e: Entradas, r: Resultado, ahora: datetime) -> Estado:
@@ -651,6 +711,7 @@ def estado(e: Entradas, r: Resultado, ahora: datetime) -> Estado:
     base = pasados[-1] if pasados else None
     absolutos = [ev for ev in pasados if ev.tipo in ("lectura", "carga_completa")]
     ultimo_abs = absolutos[-1].instante if absolutos else None
+    abs_ev = absolutos[-1] if absolutos else None
     fines = [s.fin for s in e.sesiones if s.fin <= ahora]
     candidatos = [x for x in (ultimo_abs, max(fines) if fines else None) if x is not None]
     limite = max(candidatos) if candidatos else None
@@ -681,18 +742,39 @@ def estado(e: Entradas, r: Resultado, ahora: datetime) -> Estado:
             en_curso = abiertos[-1].consumo_estimado_kwh or CERO
     nivel_plan = None if nivel is None else max(nivel - en_curso, CERO)
 
-    proximas = salidas(e, ahora, 7)
+    proximas = salidas(e, ahora, 7, r.trayectos)
     prox = proximas[0] if proximas else None
     plan, _, _ = consumo_plan(e, r.trayectos, ahora)
-    consumo = prox.consumo_declarado_kwh if prox is not None and prox.consumo_modo == "indicado" else plan
+    consumo = prox.consumo_previsto_kwh if prox is not None else plan
     necesaria = None
     if prox is not None and nivel_plan is not None:
-        reserva = p.valor("reserva_pct", ahora) / CIEN * cap
-        tope = p.valor("tope_pct", ahora) / CIEN * cap
-        # Objetivo de salida = min(tope, max(reserva + consumo previsto, pct_objetivo)), en kWh.
-        assert consumo is not None
-        objetivo = reserva + consumo
-        if prox.pct_objetivo is not None:
-            objetivo = max(objetivo, prox.pct_objetivo / CIEN * cap)
-        necesaria = min(max(objetivo - nivel_plan, CERO), max(tope - nivel_plan, CERO))
-    return Estado(nivel, pendiente, coche, en_curso, nivel_plan, prox.salida if prox else None, consumo, necesaria)
+        necesaria = max(prox.objetivo_kwh - nivel_plan, CERO)
+
+    # Confianza del nivel (0016): desde la última lectura, solo cargas (leido_carga) o nada (leido).
+    lecturas = sorted((lec for lec in e.lecturas if lec.instante <= ahora), key=lambda lec: lec.instante)
+    ultima = lecturas[-1] if lecturas else None
+    cargados = trayectos_desde = kwh_trayectos = None
+    if ultima is not None:
+        ev_lec = next(ev for ev in pasados if ev.tipo == "lectura" and ev.lectura_id == ultima.id)
+        despues = [ev for ev in pasados if ev.n > ev_lec.n]
+        cargados = sum((ev.delta_kwh for ev in despues
+                        if ev.tipo in ("sesion", "carga_externa") and ev.delta_kwh is not None), CERO) + pendiente
+        kwh_trayectos = sum((-ev.delta_kwh for ev in despues if ev.tipo == "trayecto" and ev.delta_kwh is not None),
+                            CERO)
+        trayectos_desde = sum(1 for t in r.trayectos if not t.corto and t.llegada is not None
+                              and ultima.instante < t.llegada <= ahora)
+    confianza = "estimado"
+    if abs_ev is not None and abs_ev.tipo == "lectura" and coche != "fuera":
+        despues_abs = [ev for ev in pasados if ev.n > abs_ev.n]
+        con_trayecto = any(ev.tipo == "trayecto" and not por_salida(r, ev).corto for ev in despues_abs)
+        if not con_trayecto:
+            cargas = any(ev.tipo in ("sesion", "carga_externa") and ev.delta_kwh is not None and ev.delta_kwh > 0
+                         for ev in despues_abs)
+            confianza = "leido_carga" if cargas or pendiente > 0 else "leido"
+    return Estado(nivel, pendiente, coche, en_curso, nivel_plan, prox.salida if prox else None, consumo, necesaria,
+                  confianza, ultima.instante if ultima else None, ultima.pct if ultima else None, cargados,
+                  trayectos_desde, kwh_trayectos, prox.objetivo_kwh if prox else None)
+
+
+def por_salida(r: Resultado, ev: Evento) -> Trayecto:
+    return next(t for t in r.trayectos if t.conector == ev.conector and t.salida == ev.trayecto_salida)

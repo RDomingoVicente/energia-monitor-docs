@@ -35,7 +35,8 @@ class Config:
     horarios: tuple[time, ...] = HORARIOS_POR_DEFECTO
     # Separación mínima entre peticiones a la fuente.
     intervalo_descargas_s: float = 1.0
-    grafana_db_password: str | None = None
+    grafana_db_password: str | None = field(default=None, repr=False)
+    formulario_db_password: str | None = field(default=None, repr=False)
     # Sin token, el colector no usa ESIOS. Fuera del repr para no mostrarlo.
     esios_token: str | None = field(default=None, repr=False)
     esios_carga_desde: date = date(2026, 1, 1)
@@ -61,6 +62,7 @@ class Config:
             horarios=_horarios(horarios) if horarios else base.horarios,
             intervalo_descargas_s=float(intervalo) if intervalo else base.intervalo_descargas_s,
             grafana_db_password=valor("GRAFANA_DB_PASSWORD"),
+            formulario_db_password=valor("FORMULARIO_DB_PASSWORD"),
             esios_token=valor("ESIOS_TOKEN"),
             esios_carga_desde=date.fromisoformat(esios_desde) if esios_desde else base.esios_carga_desde,
             esios_horarios=_horarios(esios_horarios) if esios_horarios else base.esios_horarios,

@@ -81,10 +81,19 @@ def migrar(conn: psycopg.Connection, directorio: Path | None = None) -> list[str
 
 def configurar_rol_grafana(conn: psycopg.Connection, password: str) -> None:
     """Habilita el login de grafana_ro con la contraseña de GRAFANA_DB_PASSWORD."""
+    _configurar_rol(conn, "grafana_ro", password)
+
+
+def configurar_rol_formulario(conn: psycopg.Connection, password: str) -> None:
+    """Habilita el login de formulario_rw (0016) con la contraseña de FORMULARIO_DB_PASSWORD."""
+    _configurar_rol(conn, "formulario_rw", password)
+
+
+def _configurar_rol(conn: psycopg.Connection, rol: str, password: str) -> None:
     if not password:
-        raise ValueError("contraseña vacía para grafana_ro")
+        raise ValueError(f"contraseña vacía para {rol}")
     conn.execute(
-        sql.SQL("ALTER ROLE grafana_ro WITH LOGIN PASSWORD {}").format(sql.Literal(password))
+        sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {}").format(sql.Identifier(rol), sql.Literal(password))
     )
 
 

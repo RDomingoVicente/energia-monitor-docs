@@ -170,11 +170,20 @@ docker compose exec collector python -m energia_monitor bateria estado
 docker compose exec collector python -m energia_monitor bateria lectura --pct 62
 docker compose exec collector python -m energia_monitor bateria lectura --pct 58 --instante "2026-11-15 08:30" --nota "app del coche"
 docker compose exec collector python -m energia_monitor bateria recalcular
+docker compose exec collector python -m energia_monitor bateria carga-externa --kwh 28.4 --coste 12.75 \
+  --instante "2026-11-21 13:10" --nota "Ionity Zaragoza"
 ```
 
-- `bateria estado` devuelve 1 si hay avisos (sin lecturas recientes,
-  intervalo incoherente, factor sugerido distinto, hueco de muestreo, sesión
-  dudosa).
+- `bateria estado` muestra el nivel con su confianza (LEÍDO, LEÍDO + CARGA o
+  ESTIMADO) y devuelve 1 si hay avisos (catálogo de
+  formulario-maquetas.md, 7.7).
+- `bateria recalcular` dice cuánto ha tardado (también en
+  `bateria_recalculo`).
+- `bateria carga-externa`: carga fuera de casa, con kWh y coste opcionales.
+  Solo con el coche desconectado a esa hora. Sin kWh no suma al nivel y el
+  intervalo queda fuera de la estadística: al volver, anota una lectura.
+  Para anular una por SQL: `UPDATE bateria_carga_externa SET anulada_en = now(),
+  motivo = '...' WHERE id = N` y `bateria recalcular`.
 - `bateria lectura` toma la hora de Madrid (por defecto, ahora). Para
   corregir o anular una lectura hasta que llegue el formulario:
 
@@ -195,8 +204,12 @@ docker compose exec collector python -m energia_monitor parametro registrar --am
 ```
 
 Registrar un parámetro de batería recalcula el nivel. Los booleanos van como
-0/1 (`detectar_carga_completa`). Un valor fuera de rango lo rechaza el CHECK
-de la tabla.
+0/1 (`detectar_carga_completa`). Cada clave tiene un rango
+(`bateria_parametro_clave.minimo` y `maximo`, migración 0016) que aplica un
+trigger, con el mensaje «fuera de rango (admitido de X a Y)»; además siguen
+los CHECK por clave de la 0014 (enteros, 0/1). Los nombres, textos y rangos
+son los de formulario-maquetas.md, 7.5. Clave nueva en la 0016:
+`umbral_carga_externa_kwh` (5, usuario).
 
 Horario y excepciones, por SQL hasta que llegue el formulario (horas
 locales; una excepción activa por fecha; la baja es lógica):

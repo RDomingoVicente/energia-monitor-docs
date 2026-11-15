@@ -204,8 +204,15 @@ Entrega:
    2b. Excepciones con salida o sin salida (v0.5.1, migración 0015): cambio
    de E2.7 del 15/11/2026 (formulario-maquetas.md, sección 8, punto 2).
    Verificado con tests, también la conversión de las excepciones de 0014.
-3. Formulario (E2.9): maquetas en formulario-maquetas.md; migración 0016
-   (rol `formulario_rw`), v0.5.2.
+3. Formulario (E2.9), en dos subpasos; maquetas y cambios al modelo en
+   formulario-maquetas.md (sección 8).
+   3a. Modelo (v0.5.2, migración 0016): confianza del nivel, rangos y textos
+   de los parámetros, cargas externas, avisos con historial, vistas de las
+   pantallas, rol `formulario_rw` y CLI `bateria carga-externa`. Verificado
+   con tests (SQL frente a la referencia, también en las historias
+   aleatorias con cargas externas). Pendiente: medir `recalcular_bateria`
+   en el NAS con los datos reales.
+   3b. Servidor y pantallas (v0.5.3): pendiente.
 4. Dashboard de batería (E2.10, segunda parte): pendiente.
 
 ### Objetivo
@@ -383,13 +390,37 @@ muestras y los dos extremos del intervalo.
 - Vistas para la página, Grafana y la etapa 3: estado de la batería y
   próximas salidas (la energía necesaria, solo de la primera: la de las
   siguientes depende del plan de carga de la etapa 3).
-- Avisos del estado de la batería:
-  - intervalo incoherente (E2.5);
-  - sin lecturas en los últimos `aviso_sin_lectura_dias`;
-  - factor sugerido distinto del vigente (E2.6);
+- Avisos de la batería (`bateria_avisos()` y `v_aviso`, 0016; catálogo en
+  formulario-maquetas.md, 7.7):
+  - **cargador no accesible** (error): la última muestra es más antigua que
+    `hueco_muestreo_aviso_s`; la página no consulta el cargador;
+  - sin lecturas en los últimos `aviso_sin_lectura_dias`, solo con el nivel
+    ESTIMADO;
   - **hueco de muestreo** de más de `hueco_muestreo_aviso_s` desde el último
     valor absoluto: puede esconder un trayecto, así que el nivel estimado
-    queda marcado como dudoso hasta la siguiente lectura.
+    queda marcado como dudoso hasta la siguiente lectura;
+  - intervalo incoherente (E2.5);
+  - **¿Cargaste fuera de casa?**: solo en el intervalo que termina en la
+    última lectura, si no tiene cargas externas y el residuo (consumo
+    estimado − consumo real) supera `umbral_carga_externa_kwh`;
+  - objetivo por encima del tope, en cada salida de los próximos 7 días;
+  - carga completa dudosa (sesión sin muestra posterior, E2.3);
+  - factor sugerido distinto del vigente (E2.6, info).
+- `aviso_historial` guarda cuándo empieza y termina cada aviso; lo mantiene
+  `actualizar_avisos()`, que llaman el muestreo cada minuto y cada recálculo.
+- **Confianza del nivel** (0016): `leido` si desde la última lectura no ha
+  pasado nada; `leido_carga` si solo ha habido cargas (sesiones, la sesión en
+  curso o cargas externas con kWh); `estimado` con trayectos no cortos desde
+  entonces, con el coche fuera, si el último valor absoluto es una carga
+  completa (regla sin verificar) o si no hay lecturas (nivel NULL).
+- **Cargas externas** (0016): evento `carga_externa` (orden 4; la lectura
+  pasa a 5) que parte el trayecto por tiempo. Con kWh suma kWh ×
+  `factor_bateria` y entra en la reconciliación como una sesión más; sin kWh
+  no suma y el intervalo queda en `carga_externa_sin_kwh`: no se reparte ni se
+  marca incoherente, y sus trayectos quedan sin reconciliar (fuera de la
+  mediana y del P75). Un intervalo con cargas externas no sirve para
+  calibrar. Solo se admite un instante en que el coche estaba desconectado
+  (último estado del conector libre).
 
 **E2.8 Parámetros.** Tabla `bateria_parametro` con vigencia, origen, fuente y
 nota, siguiendo el patrón de `cargador_parametro`. Origen: contrato,

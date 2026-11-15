@@ -158,6 +158,9 @@ def _registrar_simple(
                     (clave, desde, hasta, valor, origen, fuente, nota),
                 ).fetchone()
         except psycopg.errors.CheckViolation as e:
+            if e.diag.constraint_name == "bateria_parametro_en_rango":
+                # Rango de bateria_parametro_clave (0016): el mensaje ya trae el rango admitido.
+                raise ErrorParametro(str(e.diag.message_primary)) from e
             raise ErrorParametro(f"valor no válido para {clave}: {valor} ({e.diag.constraint_name})") from e
         assert fila is not None
         return Registro(cerrada=cerrada, nueva=fila[0])

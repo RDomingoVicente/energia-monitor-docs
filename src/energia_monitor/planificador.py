@@ -58,6 +58,9 @@ def preparar_bd(conn: psycopg.Connection, config: Config) -> None:
     if config.grafana_db_password:
         db.configurar_rol_grafana(conn, config.grafana_db_password)
         log.info("rol grafana_ro habilitado para login")
+    if config.formulario_db_password:
+        db.configurar_rol_formulario(conn, config.formulario_db_password)
+        log.info("rol formulario_rw habilitado para login")
 
 
 def ejecutar(

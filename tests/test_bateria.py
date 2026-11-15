@@ -272,7 +272,7 @@ def test_consumo_para_planificar_por_dia_de_uso() -> None:
 
 def test_salidas_con_horario_y_excepciones() -> None:
     e, ahora = ESCENARIOS["prevision"]()
-    s = bateria.salidas(e, ahora, 7)
+    s = bateria.salidas(e, ahora, 7, bateria.recalcular(e, ahora).trayectos)
     # Lunes 16 sin salida; martes 17 a las 6:30; miércoles y jueves a las 9; viernes a las 7; lunes 23 a las 9.
     assert [(x.fecha.day, x.salida.astimezone(bateria.MADRID).time(), x.tipo) for x in s] == [
         (17, time(6, 30), "con_salida"), (18, time(9), "horario"), (19, time(9), "horario"),
@@ -309,7 +309,7 @@ def test_energia_necesaria_por_combinacion(nombre: str, salida: time, consumo: D
 def test_salidas_por_combinacion() -> None:
     def primera(nombre: str) -> tuple:
         e, ahora = ESCENARIOS[f"excepcion_{nombre}"]()
-        s = bateria.salidas(e, ahora, 7)[0]
+        s = bateria.salidas(e, ahora, 7, bateria.recalcular(e, ahora).trayectos)[0]
         return (s.fecha.day, s.tipo, s.consumo_modo, s.pct_objetivo, s.consumo_declarado_kwh)
     assert primera("normal") == (17, "con_salida", "normal", None, None)
     assert primera("km") == (17, "con_salida", "indicado", None, D(46))
@@ -388,3 +388,103 @@ def test_hueco_solo_tras_muestras_sin_intervalo() -> None:
     assert bateria.hay_hueco(lejos, t(0.2), t(1.1), umbral)
     assert not bateria.hay_hueco([lejos[0], bateria.MuestraEstado(t(1), 60, D(0), 4)], t(0.2), t(1.1), umbral)
     assert bateria.hay_hueco([], t(0), t(1), umbral)
+
+
+# --- Confianza del nivel y cargas externas (0016) ---------------------------------------------------
+
+
+@pytest.mark.parametrize(("nombre", "confianza", "cargados", "trayectos", "kwh_trayectos"), [
+    ("confianza_leido", "leido", D(0), 0, D(0)),
+    ("confianza_leido_carga", "leido_carga", D("8.6"), 0, D(0)),
+    # 59 muestras de 60 s a 4 kW tras el estado 6: 3,9333 kWh del contador × 0,86.
+    ("confianza_carga_en_curso", "leido_carga", D(59) * 4000 * 60 / 3600 / 1000 * D("0.86"), 0, D(0)),
+    ("confianza_estimado_tras_trayecto", "estimado", D("8.6"), 1, D(25)),
+    ("confianza_desconexion_corta", "leido", D(0), 0, D(0)),
+    ("confianza_tras_carga_completa", "estimado", D("25.8"), 0, D(0)),
+    ("confianza_secuencia", "leido", D(0), 0, D(0)),
+])
+def test_confianza(nombre: str, confianza: str, cargados: D, trayectos: int, kwh_trayectos: D) -> None:
+    e, ahora, r = calcular(nombre)
+    est = bateria.estado(e, r, ahora)
+    assert est.confianza == confianza
+    assert cerca(est.kwh_cargados_desde_lectura, cargados)
+    assert est.trayectos_desde_lectura == trayectos
+    assert cerca(est.kwh_trayectos_desde_lectura, kwh_trayectos)
+
+
+def test_sin_lecturas_es_estimado_sin_nivel() -> None:
+    e, ahora, r = calcular("coche_fuera")
+    e.lecturas = []
+    r = bateria.recalcular(e, ahora)
+    est = bateria.estado(e, r, ahora)
+    assert (est.confianza, est.nivel_kwh, est.ultima_lectura_ts, est.kwh_cargados_desde_lectura) == (
+        "estimado", None, None, None)
+
+
+def test_secuencia_lectura_carga_trayecto_lectura() -> None:
+    e, _ = ESCENARIOS["confianza_secuencia"]()
+    # Instantes intermedios: leído, leído + carga, estimado (fuera y de vuelta) y leído otra vez.
+    pasos = [(t(1.5), "leido"), (t(5), "leido_carga"), (t(7), "estimado"), (t(8.5), "estimado"), (t(10), "leido")]
+    for instante, confianza in pasos:
+        r = bateria.recalcular(e, instante)
+        assert bateria.estado(e, r, instante).confianza == confianza, instante
+
+
+def test_carga_externa_con_kwh_reconciliacion_exacta() -> None:
+    e, ahora, r = calcular("externa_con_kwh")
+    (i,) = r.intervalos
+    assert (i.estado, i.cargas_externas) == ("reconciliado", 1)
+    assert i.externa_kwh == D(30) * D("0.86")
+    assert cerca(i.consumo_real_kwh, kwh(20) + D("25.8") - kwh(35))
+    (tr,) = r.trayectos
+    assert tr.origen_consumo == "reconciliado" and cerca(tr.consumo_kwh, kwh(20) + D("25.8") - kwh(35))
+    # El trayecto se parte en la carga: 3 h antes y 5 h después.
+    partes = [ev for ev in r.eventos if ev.tipo == "trayecto"]
+    assert [ev.peso for ev in partes] == [D(3) / 8, D(5) / 8]
+    ext = next(ev for ev in r.eventos if ev.tipo == "carga_externa")
+    assert ext.orden == 4 and ext.delta_kwh == D("25.8")
+    assert i.factor_observado is None
+    assert bateria.estado(e, r, ahora).confianza == "leido"
+
+
+def test_carga_externa_sin_kwh_excluye_el_intervalo() -> None:
+    e, ahora, r = calcular("externa_sin_kwh")
+    (i,) = r.intervalos
+    assert (i.estado, i.cargas_externas, i.externa_kwh) == ("carga_externa_sin_kwh", 1, 0)
+    (tr,) = r.trayectos
+    # Sin reconciliar: consumo estimado aplicado y fuera de la mediana y del P75.
+    assert (tr.origen_consumo, tr.consumo_kwh, tr.reconciliado_en) == ("inicial", D(25), None)
+    assert [d.cuenta for d in bateria.consumo_por_dia(r.trayectos)] == [False]
+    ext = next(ev for ev in r.eventos if ev.tipo == "carga_externa")
+    assert ext.delta_kwh is None
+
+
+def test_carga_externa_anulada_no_cuenta() -> None:
+    e, ahora = ESCENARIOS["externa_con_kwh"]()
+    e.cargas_externas = []  # solo entran las activas
+    r = bateria.recalcular(e, ahora)
+    (i,) = r.intervalos
+    assert i.cargas_externas == 0 and i.estado == "incoherente"
+
+
+def test_calibracion_excluye_intervalos_con_carga_externa() -> None:
+    e, ahora = ESCENARIOS["calibracion"]()
+    r = bateria.recalcular(e, ahora)
+    con_factor = [i for i in r.intervalos if i.factor_observado is not None]
+    assert con_factor
+    primero = con_factor[0]
+    # Una carga externa (aunque sea de 0 kWh) dentro del intervalo lo saca de la calibración.
+    e.cargas_externas = [bateria.CargaExterna(1, primero.desde + (primero.hasta - primero.desde) / 2, D(0))]
+    r2 = bateria.recalcular(e, ahora)
+    i2 = next(i for i in r2.intervalos if i.desde == primero.desde)
+    assert i2.cargas_externas == 1 and i2.factor_observado is None
+
+
+def test_objetivo_por_salida() -> None:
+    e, ahora, r = calcular("excepcion_km_tope")
+    s = bateria.salidas(e, ahora, 7, r.trayectos)
+    martes = s[0]
+    assert cerca(martes.objetivo_sin_tope_kwh, kwh(25) + 115) and martes.objetivo_kwh == CAP
+    # Las demás salidas, con el P75 (aquí el consumo inicial).
+    assert all(cerca(x.objetivo_kwh, kwh(25) + 25) for x in s[1:])
+    assert bateria.estado(e, r, ahora).objetivo_kwh == CAP

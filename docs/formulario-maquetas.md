@@ -1,7 +1,7 @@
 # Formulario de batería: maquetas aprobadas
 
 Estado a 15/11/2026, alineado con v0.5.1 (migración 0015). Complementa a
-`docs/fase2-etapa2.md` (E2.9) y a `docs/fase2.md`. La
+`docs/fase2.md` (sección «Etapa 2: batería y previsión», E2.9). La
 especificación manda en datos y cálculo; este documento manda en presentación,
 textos y validaciones de la página. La sección 8 recoge los cambios al modelo
 que salen de la revisión de las maquetas.
@@ -236,9 +236,10 @@ Maqueta 05.
 | `consumo_inicial_trayecto_kwh` | Consumo inicial por trayecto | 25 kWh | 1–90 |
 | `consumo_kwh_100km` | Consumo medio | 23 kWh/100 km | 10–40 |
 | `energia_min_calibracion_kwh` | Energía mínima para calibrar | 5 kWh | 1–30 |
+| `observaciones_calibracion` | Observaciones para calibrar | 5 | 1–20 |
 | `detectar_carga_completa` | Detectar carga completa | sí | sí/no |
 | `hueco_muestreo_aviso_s` | Aviso hueco de muestreo | 30 min (1800 s) | 5 min–4 h |
-| `aviso_sin_lectura_dias` | Aviso sin lecturas | 2 días | 0,5–7 |
+| `aviso_sin_lectura_dias` | Aviso sin lecturas | 7 días | 1–14 (días enteros) |
 | `umbral_carga_externa_kwh` | Umbral de carga externa | 5 kWh | 1–30 |
 
 - La clave del parámetro no cambia (`factor_bateria`); solo el nombre en
@@ -276,12 +277,12 @@ Maqueta 07.
 
 | Nivel | Aviso | Regla | Acción |
 |---|---|---|---|
-| ERROR | Cargador no accesible | sin respuesta del cliente | — |
+| ERROR | Cargador no accesible | última muestra más antigua que `hueco_muestreo_aviso_s` (la página no consulta el cargador) | — |
 | ERROR | Base de datos no accesible | (página de error 503) | — |
 | AVISO | Sin lecturas | `estimado` y más de `aviso_sin_lectura_dias` | Anotar lectura |
 | AVISO | Hueco de muestreo | hueco > `hueco_muestreo_aviso_s` | — |
 | AVISO | Intervalo incoherente | E2.5 | Historial |
-| AVISO | ¿Cargaste fuera de casa? | residuo positivo de la reconciliación > `umbral_carga_externa_kwh` | Carga externa |
+| AVISO | ¿Cargaste fuera de casa? | residuo positivo > `umbral_carga_externa_kwh` en el intervalo que termina en la última lectura | Carga externa |
 | AVISO | Objetivo por encima del tope | objetivo > `tope_pct` | Excepciones |
 | INFO | Calibración sugerida | E2.6 | Parámetros |
 
@@ -305,7 +306,7 @@ aviso «¿Cargaste fuera de casa?».
 
 ## 8. Cambios al modelo derivados de la revisión
 
-1. `v_bateria_estado.confianza` text NOT NULL CHECK IN (`leido`,
+1. **Hecho en v0.5.2 (migración 0016).** `v_bateria_estado.confianza` text NOT NULL CHECK IN (`leido`,
    `leido_carga`, `estimado`), con `ultima_lectura_ts`, `ultima_lectura_pct`,
    `kwh_cargados_desde_lectura`, `trayectos_desde_lectura`,
    `kwh_trayectos_desde_lectura`. Tests: un caso por estado y la secuencia
@@ -313,17 +314,18 @@ aviso «¿Cargaste fuera de casa?».
 2. Excepciones: **hecho en v0.5.1 (migración 0015)**. Tipos `con_salida` y
    `sin_salida`, `consumo_modo`, `km`/`pct`, `pct_objetivo`; validación y
    «Modificar» en `bateria_servicio.py` (`ErrorExcepcion` → 422).
-3. Parámetros: se usan los existentes `aviso_sin_lectura_dias` y
+3. **Hecho en v0.5.2.** Parámetros: se usan los existentes `aviso_sin_lectura_dias` y
    `hueco_muestreo_aviso_s`. Único parámetro nuevo: `umbral_carga_externa_kwh`
    (punto 7).
-4. `bateria_parametro_clave`: columnas `nombre`, `descripcion`, `efecto`,
+4. **Hecho en v0.5.2.** `bateria_parametro_clave`: columnas `nombre`, `descripcion`, `efecto`,
    `unidad`, `minimo`, `maximo` (textos de la sección 7.5 y de la maqueta 06).
    La validación de rangos lee `minimo`/`maximo`.
-5. Avisos: vista `v_aviso` (activos, calculados, incluido «Objetivo por
+5. **Hecho en v0.5.2.** Avisos: vista `v_aviso` (activos, calculados, incluido «Objetivo por
    encima del tope») y tabla `aviso_historial` (tipo, inicio, fin, detalle)
    mantenida por el recálculo periódico.
 6. Horario sin vigencia (decisión tomada): no hay cambio de modelo.
-7. Cargas externas: evento nuevo `carga_externa` en el registro de batería
+7. **Hecho en v0.5.2** (los paneles de coste de Grafana, en el paso 4).
+   Cargas externas: evento nuevo `carga_externa` en el registro de batería
    (instante, `kwh` NULL si se desconoce, `coste_eur` NULL si se desconoce,
    nota; corregir y anular como las lecturas).
    - Con kWh: suma `kwh × factor_bateria` al nivel y entra en la
@@ -331,10 +333,12 @@ aviso «¿Cargaste fuera de casa?».
    - Sin kWh: no suma; el intervalo entre los dos valores absolutos que la
      rodean no se marca como incoherente y sus trayectos quedan fuera de la
      mediana y del P75 (E2.4, E2.7).
-   - Detección: si la reconciliación de un intervalo sin cargas externas da un
-     residuo positivo (más energía de la explicable) mayor que
-     `umbral_carga_externa_kwh` (parámetro nuevo, 5, usuario), se genera el
-     aviso «¿Cargaste fuera de casa?».
+   - Detección: solo se evalúa el intervalo que termina en la última
+     lectura. Si no tiene cargas externas y su reconciliación da un residuo
+     positivo (consumo estimado − consumo real: más energía de la
+     explicable) mayor que `umbral_carga_externa_kwh` (parámetro nuevo, 5,
+     usuario), se genera el aviso «¿Cargaste fuera de casa?». Desaparece con
+     la siguiente lectura o al registrar una carga externa en ese intervalo.
    - Coste: el gasto del coche en Grafana («Energía: coche» y «Energía:
      batería») suma el coste de las cargas externas, separado del de casa.
    - Tests: carga externa con kWh (reconciliación exacta), sin kWh (intervalo
