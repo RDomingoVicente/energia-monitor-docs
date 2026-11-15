@@ -59,9 +59,11 @@ sobrescribe ("Import (Overwrite)"); desaparece la fila "Coche", que pasa al
 dashboard nuevo. Los enlaces guardados al dashboard de precios siguen
 valiendo.
 
-Todos llevan la etiqueta `energia` y, arriba a la derecha, el enlace
+Todos llevan la etiqueta `energia` y, arriba a la derecha, el desplegable
 "Energía", que lista los demás y conserva el rango y las variables
-(`keepTime` e `includeVars`). Por eso tienen las mismas variables: el
+(`keepTime` e `includeVars`). Es desplegable (`asDropdown`) porque, como
+botones sueltos, en "Energía: batería" no cabían junto a los interruptores
+de las anotaciones. Por eso tienen las mismas variables: el
 datasource (`ds`), el contrato y la fuente. Rango por defecto: hoy y mañana
 (zona Europe/Madrid).
 
@@ -152,8 +154,9 @@ datos por SQL, `bateria recalcular` (docs/parametros.md).
 
 Las anotaciones solo se dibujan en «Nivel de batería»; se apagan con sus
 interruptores arriba del dashboard. El enlace «Grafana» del formulario
-apunta aquí: `FORMULARIO_GRAFANA_URL=https://<grafana>/d/energia-bateria`
-(deploy/.env.example).
+puede apuntar aquí (`FORMULARIO_GRAFANA_URL=https://<grafana>/d/energia-bateria`)
+o a cualquiera de los otros dos: desde todos se llega al resto con el
+desplegable (deploy/.env.example).
 
 Las gráficas temporales dibujan el rango del selector (hoy, por defecto).
 Las que muestran un periodo fijo ("Precio final: media diaria", "Diferencia

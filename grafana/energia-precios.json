@@ -28,7 +28,7 @@
       "tags": [
         "energia"
       ],
-      "asDropdown": false,
+      "asDropdown": true,
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,

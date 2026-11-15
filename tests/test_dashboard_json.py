@@ -93,6 +93,9 @@ def test_enlazados_por_etiqueta_con_rango_y_variables(nombre: str) -> None:
     assert len(enlaces) == 1
     assert enlaces[0]["tags"] == ["energia"]
     assert enlaces[0]["keepTime"] and enlaces[0]["includeVars"]
+    # Desplegable: como botones sueltos, con los interruptores de anotaciones de «batería» no cabían en
+    # la barra y «Energía: precios» solo aparecía al ensanchar la ventana.
+    assert enlaces[0]["asDropdown"]
 
 
 @pytest.mark.parametrize("nombre", DASHBOARDS)
