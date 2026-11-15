@@ -34,6 +34,8 @@
 - bateria recalcular: rehace el nivel, los trayectos y la reconciliación
   (tras cambiar por SQL lecturas, excepciones o datos del cargador) y
   muestra cuánto ha tardado.
+- formulario servir | salud: página de batería por HTTPS (FORMULARIO_HOST,
+  certificados en FORMULARIO_CERTIFICADOS) y healthcheck del contenedor.
 - bateria carga-externa [--kwh N] [--coste EUR] [--instante "AAAA-MM-DD HH:MM"]
   [--nota TEXTO]: carga fuera de casa (con el coche desconectado) y recálculo.
 
@@ -118,6 +120,11 @@ def _parser() -> argparse.ArgumentParser:
     recalcular = sub_cargador.add_parser("recalcular", help="recalcula energia_tramo desde las muestras")
     recalcular.add_argument("--desde", type=date.fromisoformat, required=True)
     recalcular.add_argument("--hasta", type=date.fromisoformat, help="por defecto, hoy")
+
+    formulario = sub.add_parser("formulario", help="página de batería por HTTPS (servicio formulario)")
+    sub_formulario = formulario.add_subparsers(dest="accion", required=True)
+    sub_formulario.add_parser("servir", help="atiende la página en FORMULARIO_PUERTO (8443) con TLS")
+    sub_formulario.add_parser("salud", help="healthcheck: GET /salud por HTTPS verificando el certificado")
 
     bateria = sub.add_parser("bateria", help="nivel de batería estimado y previsión")
     sub_bateria = bateria.add_subparsers(dest="accion", required=True)
@@ -317,6 +324,33 @@ def _parametro(args: argparse.Namespace) -> int:
         return 0 if _refrescar(conn) else 1
 
 
+def _formulario(args: argparse.Namespace) -> int:
+    from energia_monitor.formulario import config as config_formulario
+
+    try:
+        cfg = config_formulario.desde_entorno()
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if args.accion == "salud":
+        from energia_monitor.formulario import salud
+
+        resultado = salud.comprobar(cfg.nombre, cfg.puerto)
+        print(resultado.detalle)
+        return 0 if resultado.ok else 1
+    from energia_monitor.formulario.app import App, ConfigApp
+    from energia_monitor.formulario.servidor import ErrorCertificado, servir
+
+    app = App(ConfigApp(cfg.host, cfg.grafana_url, cfg.cargador))
+    try:
+        servir(app, cfg.certificados, cfg.puerto, _stop_por_senales())
+    except ErrorCertificado as e:
+        log.error("formulario sin arrancar: %s", e)
+        return 1
+    log.info("parada completada")
+    return 0
+
+
 def _stop_por_senales() -> threading.Event:
     stop = threading.Event()
 
@@ -347,6 +381,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if orden == "bateria":
         return _bateria(args)
+
+    if orden == "formulario":
+        return _formulario(args)
 
     if orden == "migrar":
         with db.conectar() as conn:

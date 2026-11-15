@@ -73,6 +73,42 @@ services:
       VIARIS_URL: ${VIARIS_URL:-}
       TZ: Europe/Madrid
 
+  # Formulario de batería (fase 2, etapa 2, E2.9): HTTPS solo dentro del tailnet,
+  # nunca con Tailscale Funnel. Rol formulario_rw; la página no consulta el
+  # cargador (VIARIS_URL solo da la etiqueta del chip). Certificados y arranque
+  # tras Tailscale: deploy/README.md.
+  formulario:
+    image: ${HARBOR_REGISTRY}/${HARBOR_PROJECT:-energia}/collector:${COLLECTOR_TAG:-latest}
+    # Nombre fijo: lo usa el script de renovación del certificado (deploy_ct).
+    container_name: energia-formulario
+    command: ["python", "-m", "energia_monitor", "formulario", "servir"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-energia}
+      PGUSER: formulario_rw
+      PGPASSWORD: ${FORMULARIO_DB_PASSWORD:?definir FORMULARIO_DB_PASSWORD en .env}
+      FORMULARIO_HOST: ${FORMULARIO_HOST:?definir FORMULARIO_HOST en .env}
+      FORMULARIO_GRAFANA_URL: ${FORMULARIO_GRAFANA_URL:-}
+      VIARIS_URL: ${VIARIS_URL:-}
+      TZ: Europe/Madrid
+    volumes:
+      - ./certs:/certs:ro
+    ports:
+      - "${FORMULARIO_BIND:?definir FORMULARIO_BIND (IP del NAS en el tailnet) en .env}:8421:8443"
+    healthcheck:
+      test: ["CMD", "python", "-m", "energia_monitor", "formulario", "salud"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
 networks:
   default:
     # Nombre fijo: el stack de Grafana se une a ella como red externa.

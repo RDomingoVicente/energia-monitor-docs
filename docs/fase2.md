@@ -218,7 +218,16 @@ Entrega:
    v0.5.3 (migración 0017): cierre `sin_muestreo` para las sesiones
    anteriores al muestreo (E2.3), que daban 42 falsos avisos de carga
    completa dudosa en el NAS.
-   3b. Servidor y pantallas (v0.5.4): pendiente.
+   3b. Servidor y pantallas, en dos entregas:
+   - v0.5.4: servicio `formulario` (HTTPS con `ssl`, recarga del
+     certificado, `Host` y origen comprobados, CSP `default-src 'self'`),
+     `/salud` y healthcheck que verifica el certificado real, Inicio con la
+     lectura (PRG: el 303 lleva solo `?ok=lectura&id=N` y el mensaje sale de
+     la base de datos), compose y deploy/README.md (certificados, arranque
+     tras Tailscale y ACL). Verificado con tests (también TLS con certificado
+     caducado, de otro nombre o ausente) y con la imagen contra PostgreSQL en
+     local. Pendiente: desplegar en el NAS y abrirla desde el móvil.
+   - v0.5.5: resto de pantallas y Playwright (`test-ui`): pendiente.
 4. Dashboard de batería (E2.10, segunda parte): pendiente.
 
 ### Objetivo

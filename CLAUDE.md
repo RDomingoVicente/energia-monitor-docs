@@ -34,16 +34,18 @@ Antes de cualquier cambio, leer:
   `bateria_servicio.registrar_excepcion`). Paso 3a hecho (v0.5.2): migración 0016 (confianza,
   cargas externas, avisos con historial, rangos de parámetros, rol
   `formulario_rw`) y CLI `bateria carga-externa`. v0.5.3: migración 0017,
-  cierre `sin_muestreo` para sesiones anteriores al muestreo. Paso 3b
-  (servidor y pantallas, v0.5.4) pendiente. La etapa 3 no se empieza hasta nuevo aviso.
+  cierre `sin_muestreo` para sesiones anteriores al muestreo. Paso 3b,
+  primera entrega (v0.5.4): servicio `formulario` (HTTPS, Inicio y lectura;
+  `src/energia_monitor/formulario/`, deploy/README.md). Pendiente la v0.5.5
+  (resto de pantallas y Playwright). La etapa 3 no se empieza hasta nuevo aviso.
 
 ## Estructura
 
-- src/energia_monitor/   código del colector
+- src/energia_monitor/   código del colector (formulario/: página de batería por HTTPS)
 - tests/                 pytest, con respuestas reales guardadas como fixtures
 - db/migrations/         migraciones SQL versionadas (NNNN_descripcion.sql)
 - grafana/               dashboards en JSON (uno por tema) y notas del datasource
-- deploy/                docker-compose.yml y .env.example para el NAS
+- deploy/                docker-compose.yml, .env.example y README.md (formulario: certificados, arranque, ACL)
 - docs/                  contexto, especificaciones y tareas (docs/tareas/)
 - .gitea/workflows/      CI (tests en cada push; imagen a Harbor en cada tag v*)
 

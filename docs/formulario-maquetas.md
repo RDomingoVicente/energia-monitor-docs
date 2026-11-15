@@ -350,6 +350,10 @@ aviso «¿Cargaste fuera de casa?».
 
 ## 9. Criterios de aceptación de las pantallas
 
+Estado: Inicio (7.1) hecho en v0.5.4; el resto de pantallas, en v0.5.5 (hasta
+entonces muestran «Esta pantalla llega en la v0.5.5»).
+
+
 - Cada pantalla reproduce la maqueta en 1280×900 y 390×844 (mismos bloques,
   orden, componentes y textos fijos).
 - Test de desbordamiento con Playwright: ningún elemento sale de su contenedor
