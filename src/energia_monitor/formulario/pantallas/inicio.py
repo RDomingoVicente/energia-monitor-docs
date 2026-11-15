@@ -189,7 +189,7 @@ def _form(d: Inicio, form: FormLectura) -> Html:
     ho_attr, ho_err = campo("hora")
     general = h('<p class="error-campo">{}</p>', form.errores["general"]) if "general" in form.errores else Html("")
     return h(
-        '<form class="pn orden-4" action="/lectura" method="post"><div class="ph"><h2 class="pt">Anotar lectura</h2>'
+        '<form class="pn orden-4" id="lectura" action="/lectura" method="post"><div class="ph"><h2 class="pt">Anotar lectura</h2>'
         '</div><div class="relleno">{}<div class="campo"><label for="lectura-pct" class="k">Porcentaje que marca el '
         'coche</label><div class="con-unidad"><input id="lectura-pct" name="pct" class="inp grande" type="number" '
         'inputmode="numeric" min="0" max="100" step="1" required placeholder="0–100" value="{}"{}><span>%</span>'

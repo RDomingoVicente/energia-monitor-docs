@@ -6,3 +6,5 @@ __pycache__
 .pytest_cache
 deploy
 docs
+# Maquetas: solo para tests/ui/capturas.py (el Dockerfile principal no las copia).
+!docs/maquetas

@@ -106,12 +106,16 @@ def cabecera(conn: psycopg.Connection, ahora: datetime, cargador: str) -> Cabece
     return Cabecera(avisos, ultima, ok, recalculo, cargador)
 
 
-def inicio(conn: psycopg.Connection, ahora: datetime) -> Inicio:
+def estado(conn: psycopg.Connection, ahora: datetime) -> dict[str, Any]:
     cur = conn.execute("SELECT * FROM bateria_estado(%s)", (ahora,))
     columnas = [c.name for c in cur.description or []]
     fila = cur.fetchone()
     assert fila is not None
-    estado = dict(zip(columnas, fila))
+    return dict(zip(columnas, fila))
+
+
+def inicio(conn: psycopg.Connection, ahora: datetime) -> Inicio:
+    est = estado(conn, ahora)
 
     salidas = {f[0]: f for f in conn.execute(
         "SELECT s.fecha, s.salida, s.tipo, s.consumo_modo, s.pct_objetivo, s.consumo_previsto_kwh,"
@@ -155,18 +159,18 @@ def inicio(conn: psycopg.Connection, ahora: datetime) -> Inicio:
         "SELECT evse_w FROM cargador_muestra WHERE instante <= %s ORDER BY instante DESC LIMIT 1", (ahora,)).fetchone()
 
     origenes: set[str] = set()
-    if estado["ultima_lectura_ts"] is not None:
+    if est["ultima_lectura_ts"] is not None:
         origenes = {f[0] for f in conn.execute(
             "SELECT DISTINCT origen_consumo FROM bateria_trayecto WHERE NOT corto AND llegada IS NOT NULL"
-            " AND llegada > %s AND llegada <= %s", (estado["ultima_lectura_ts"], ahora))}
+            " AND llegada > %s AND llegada <= %s", (est["ultima_lectura_ts"], ahora))}
     reserva, tope = conn.execute("SELECT bateria_param('reserva_pct', %s), bateria_param('tope_pct', %s)",
                                  (ahora, ahora)).fetchone()  # type: ignore[misc]
-    primera = next((d for d in dias if d.salida is not None and d.salida == estado["proxima_salida"]), None)
+    primera = next((d for d in dias if d.salida is not None and d.salida == est["proxima_salida"]), None)
     pct_obj_salida = None
     if primera is not None:
         pct_obj_salida = salidas[primera.fecha][4]
     avisos = {f[0].split(":")[0] for f in conn.execute("SELECT clave FROM bateria_avisos(%s)", (ahora,))}
-    return Inicio(ahora, estado, dias, eventos, coche[0] if coche else None, muestra[0] if muestra else None,
+    return Inicio(ahora, est, dias, eventos, coche[0] if coche else None, muestra[0] if muestra else None,
                   origenes, reserva, tope, pct_obj_salida, "sin_lecturas" in avisos,
                   "intervalo_incoherente" in avisos)
 
@@ -190,3 +194,361 @@ def salud(conn: psycopg.Connection, ahora: datetime) -> dict[str, Any]:
         "ultima_muestra_s": None if ultima is None else int((ahora - ultima).total_seconds()),
         "recalculo": None if recalculo is None else recalculo.isoformat(),
     }
+
+
+# --- Excepciones (7.2) ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExcepcionProxima:
+    id: int
+    fecha: date
+    tipo: str
+    hora_salida: Any
+    consumo_modo: str | None
+    km: Decimal | None
+    pct: Decimal | None
+    pct_objetivo: Decimal | None
+    nota: str | None
+    previsto_kwh: Decimal | None
+    objetivo_pct: Decimal | None
+    minimo: bool  # el objetivo lo marca pct_objetivo
+    recortado: bool  # el objetivo supera el tope
+
+
+@dataclass(frozen=True)
+class ExcepcionPasada:
+    id: int
+    fecha: date
+    tipo: str
+    previsto_kwh: Decimal | None
+    real_kwh: Decimal | None
+    estado: str  # cumplida, no_cumplida o dada_de_baja
+
+
+@dataclass(frozen=True)
+class Plan:
+    consumo_kwh: Decimal
+    origen: str  # historia o inicial
+    reserva_pct: Decimal
+    tope_pct: Decimal
+    capacidad_kwh: Decimal
+
+
+@dataclass
+class Excepciones:
+    ahora: datetime
+    proximas: list[ExcepcionProxima]
+    pasadas: list[ExcepcionPasada]
+    plan: Plan
+
+
+SQL_PROXIMAS = """
+WITH plan AS (SELECT consumo_kwh FROM bateria_consumo_plan(%(ahora)s)),
+x AS (
+    SELECT x.*, (x.fecha + coalesce(x.hora_salida, time '00:00')) AT TIME ZONE 'Europe/Madrid' AS instante
+    FROM bateria_excepcion x
+    WHERE x.anulada_en IS NULL AND x.fecha >= (%(ahora)s AT TIME ZONE 'Europe/Madrid')::date
+), c AS (
+    SELECT x.*, bateria_param('capacidad_util_kwh', x.instante) AS cap,
+           CASE WHEN x.tipo = 'sin_salida' THEN NULL
+                WHEN x.consumo_modo = 'indicado' THEN
+                    coalesce(x.pct / 100 * bateria_param('capacidad_util_kwh', x.instante),
+                             x.km * bateria_param('consumo_kwh_100km', x.instante) / 100)
+                ELSE plan.consumo_kwh END AS previsto
+    FROM x CROSS JOIN plan
+), o AS (
+    SELECT c.*, bateria_param('reserva_pct', c.instante) / 100 * c.cap + c.previsto AS base,
+           c.pct_objetivo / 100 * c.cap AS minimo_kwh, bateria_param('tope_pct', c.instante) / 100 * c.cap AS tope
+    FROM c
+)
+SELECT id, fecha, tipo, hora_salida, consumo_modo, km, pct, pct_objetivo, nota, previsto,
+       CASE WHEN tipo = 'con_salida' THEN least(greatest(base, minimo_kwh), tope) / cap * 100 END,
+       coalesce(minimo_kwh > base, false), coalesce(greatest(base, minimo_kwh) > tope, false)
+FROM o
+ORDER BY fecha
+"""
+
+
+def plan(conn: psycopg.Connection, ahora: datetime) -> Plan:
+    fila = conn.execute(
+        "SELECT p.consumo_kwh, p.origen, bateria_param('reserva_pct', %(a)s), bateria_param('tope_pct', %(a)s),"
+        " bateria_param('capacidad_util_kwh', %(a)s) FROM bateria_consumo_plan(%(a)s) p", {"a": ahora}).fetchone()
+    assert fila is not None
+    return Plan(*fila)
+
+
+def excepciones(conn: psycopg.Connection, ahora: datetime) -> Excepciones:
+    proximas = [ExcepcionProxima(*f) for f in conn.execute(SQL_PROXIMAS, {"ahora": ahora})]
+    pasadas = [ExcepcionPasada(*f) for f in conn.execute(
+        "SELECT id, fecha, tipo, previsto_kwh, real_kwh, estado FROM v_bateria_excepcion_pasada ORDER BY fecha DESC")]
+    return Excepciones(ahora, proximas, pasadas, plan(conn, ahora))
+
+
+def excepcion(conn: psycopg.Connection, id_: int, activa: bool | None = None) -> dict[str, Any] | None:
+    cur = conn.execute("SELECT id, tipo, fecha, hora_salida, consumo_modo, km, pct, pct_objetivo, nota, anulada_en"
+                       " FROM bateria_excepcion WHERE id = %s", (id_,))
+    fila = cur.fetchone()
+    if fila is None:
+        return None
+    x = dict(zip([c.name for c in cur.description or []], fila))
+    if activa is not None and (x["anulada_en"] is None) != activa:
+        return None
+    return x
+
+
+# --- Historial (7.4) ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FilaHistorial:
+    tipo: str  # lectura, carga_externa o carga_completa
+    id: int | None
+    instante: datetime
+    pct: Decimal | None  # leído (lectura y carga completa)
+    estimado_pct: Decimal | None
+    diferencia_pts: Decimal | None  # solo en lecturas comparables; carga externa: pts sumados
+    comparable: bool
+    anulada: bool
+    nota: str | None
+    motivo: str | None
+    corrige_instante: datetime | None
+    kwh: Decimal | None  # carga externa
+    coste_eur: Decimal | None
+
+
+@dataclass
+class Historial:
+    ahora: datetime
+    dias: int | None  # None: todo
+    con_anuladas: bool
+    filas: list[FilaHistorial]
+    capacidad_kwh: Decimal
+    aviso_dias: Decimal
+    ultima_lectura: datetime | None
+    anuladas_periodo: int
+
+
+SQL_HISTORIAL = """
+SELECT 'lectura', l.id, l.instante, l.pct, l.estimado_pct,
+       CASE WHEN l.comparable THEN l.diferencia_pts END, l.comparable, l.anulada_en IS NOT NULL, l.nota, l.motivo,
+       c.instante, NULL::numeric, NULL::numeric
+FROM v_bateria_lectura_historial l
+LEFT JOIN bateria_lectura c ON c.id = l.corrige
+WHERE l.instante <= %(ahora)s AND (%(desde)s::timestamptz IS NULL OR l.instante >= %(desde)s)
+UNION ALL
+SELECT 'carga_externa', x.id, x.instante, NULL, NULL,
+       x.kwh * bateria_param('factor_bateria', x.instante) / bateria_param('capacidad_util_kwh', x.instante) * 100,
+       false, x.anulada_en IS NOT NULL, x.nota, x.motivo, NULL, x.kwh, x.coste_eur
+FROM bateria_carga_externa x
+WHERE x.instante <= %(ahora)s AND (%(desde)s::timestamptz IS NULL OR x.instante >= %(desde)s)
+UNION ALL
+SELECT 'carga_completa', NULL, s.fin, bateria_param('tope_pct', s.fin), NULL, NULL, false, false, NULL, NULL,
+       NULL, NULL, NULL
+FROM bateria_sesion s
+WHERE s.cierre = 'carga_completa' AND s.fin <= %(ahora)s AND (%(desde)s::timestamptz IS NULL OR s.fin >= %(desde)s)
+ORDER BY 3 DESC
+"""
+
+
+def historial(conn: psycopg.Connection, ahora: datetime, dias: int | None, con_anuladas: bool) -> Historial:
+    desde = None if dias is None else ahora - timedelta(days=dias)
+    filas = [FilaHistorial(*f) for f in conn.execute(SQL_HISTORIAL, {"ahora": ahora, "desde": desde})]
+    anuladas = sum(1 for x in filas if x.anulada and x.tipo == "lectura")
+    if not con_anuladas:
+        filas = [x for x in filas if not x.anulada]
+    fila = conn.execute(
+        "SELECT bateria_param('capacidad_util_kwh', %(a)s), bateria_param('aviso_sin_lectura_dias', %(a)s),"
+        " (SELECT max(instante) FROM bateria_lectura WHERE anulada_en IS NULL AND instante <= %(a)s)",
+        {"a": ahora}).fetchone()
+    assert fila is not None
+    return Historial(ahora, dias, con_anuladas, filas, fila[0], fila[1], fila[2], anuladas)
+
+
+def lectura(conn: psycopg.Connection, id_: int) -> dict[str, Any] | None:
+    cur = conn.execute("SELECT id, instante, pct, nota, anulada_en, motivo, corrige FROM bateria_lectura WHERE id = %s",
+                       (id_,))
+    fila = cur.fetchone()
+    return None if fila is None else dict(zip([c.name for c in cur.description or []], fila))
+
+
+# --- Carga externa (7.8) -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CargaExternaFila:
+    id: int
+    instante: datetime
+    kwh: Decimal | None
+    coste_eur: Decimal | None
+    nota: str | None
+    pts: Decimal | None
+    eur_kwh: Decimal | None
+
+
+@dataclass
+class CargasExternas:
+    ahora: datetime
+    filas: list[CargaExternaFila]
+    factor: Decimal
+    capacidad_kwh: Decimal
+
+
+def cargas_externas(conn: psycopg.Connection, ahora: datetime) -> CargasExternas:
+    filas = [CargaExternaFila(*f) for f in conn.execute(
+        "SELECT id, instante, kwh, coste_eur, nota, pts, eur_kwh FROM v_coste_carga_externa"
+        " WHERE instante <= %(a)s AND instante > %(a)s - interval '90 days' ORDER BY instante DESC", {"a": ahora})]
+    fila = conn.execute("SELECT bateria_param('factor_bateria', %(a)s), bateria_param('capacidad_util_kwh', %(a)s)",
+                        {"a": ahora}).fetchone()
+    assert fila is not None
+    return CargasExternas(ahora, filas, fila[0], fila[1])
+
+
+def carga_externa(conn: psycopg.Connection, id_: int) -> dict[str, Any] | None:
+    cur = conn.execute("SELECT id, instante, kwh, coste_eur, nota, anulada_en, motivo, corrige"
+                       " FROM bateria_carga_externa WHERE id = %s", (id_,))
+    fila = cur.fetchone()
+    return None if fila is None else dict(zip([c.name for c in cur.description or []], fila))
+
+
+# --- Horario (7.3) ---------------------------------------------------------------------------------
+
+
+@dataclass
+class HorarioDatos:
+    dias: dict[int, Any]  # 1 = lunes: hora o None
+    modificado: datetime | None
+    plan: Plan
+
+
+def horario(conn: psycopg.Connection, ahora: datetime) -> HorarioDatos:
+    filas = conn.execute("SELECT dia_iso, hora_salida, actualizado_en FROM bateria_horario").fetchall()
+    dias: dict[int, Any] = {d: None for d in range(1, 8)}
+    for dia, hora, _ in filas:
+        dias[dia] = hora
+    modificado = max((f[2] for f in filas), default=None)
+    return HorarioDatos(dias, modificado, plan(conn, ahora))
+
+
+# --- Parámetros (7.5) y Ayuda (7.6) ---------------------------------------------------------------
+
+ORDEN_PARAMETROS = ("capacidad_util_kwh", "reserva_pct", "tope_pct", "factor_bateria", "percentil_planificacion",
+                    "ventana_consumo_dias", "desconexion_min_s", "consumo_inicial_trayecto_kwh", "consumo_kwh_100km",
+                    "energia_min_calibracion_kwh", "observaciones_calibracion", "detectar_carga_completa",
+                    "hueco_muestreo_aviso_s", "aviso_sin_lectura_dias", "umbral_carga_externa_kwh")
+
+
+@dataclass(frozen=True)
+class Parametro:
+    clave: str
+    nombre: str
+    unidad: str
+    minimo: Decimal
+    maximo: Decimal
+    descripcion: str
+    efecto: str
+    valor: Decimal
+    origen: str
+    desde: date
+    id: int
+
+
+@dataclass(frozen=True)
+class Cambio:
+    id: int
+    clave: str
+    desde: date
+    valor: Decimal
+    anterior: Decimal | None
+    nota: str
+
+
+@dataclass(frozen=True)
+class Calibracion:
+    sugerido: Decimal | None
+    vigente: Decimal
+    observaciones: int
+    minimo: Decimal | None
+    maximo: Decimal | None
+
+
+@dataclass
+class Parametros:
+    ahora: datetime
+    vigentes: list[Parametro]
+    cambios: list[Cambio]
+    calibracion: Calibracion
+
+    def de(self, clave: str) -> Parametro:
+        return next(p for p in self.vigentes if p.clave == clave)
+
+
+def parametros(conn: psycopg.Connection, ahora: datetime) -> Parametros:
+    hoy = ahora.astimezone(MADRID).date()
+    vigentes = [Parametro(*f) for f in conn.execute(
+        "SELECT k.clave, k.nombre, k.unidad, k.minimo, k.maximo, k.descripcion, k.efecto, p.valor, p.origen,"
+        " lower(p.vigencia), p.id FROM bateria_parametro_clave k JOIN bateria_parametro p"
+        " ON p.clave = k.clave AND p.vigencia @> %s::date", (hoy,))]
+    orden = {c: i for i, c in enumerate(ORDEN_PARAMETROS)}
+    vigentes.sort(key=lambda p: orden.get(p.clave, len(orden)))
+    cambios = [Cambio(*f) for f in conn.execute(
+        "SELECT p.id, p.clave, lower(p.vigencia), p.valor, a.valor, coalesce(p.nota, p.fuente)"
+        " FROM bateria_parametro p LEFT JOIN LATERAL (SELECT q.valor FROM bateria_parametro q"
+        " WHERE q.clave = p.clave AND lower(q.vigencia) < lower(p.vigencia) ORDER BY lower(q.vigencia) DESC LIMIT 1) a"
+        " ON true ORDER BY p.id DESC LIMIT 5")]
+    fila = conn.execute(
+        "SELECT s.factor, s.observaciones, bateria_param('factor_bateria', %(a)s),"
+        " (SELECT min(o.factor_observado) FROM (SELECT c.factor_observado FROM v_bateria_calibracion c"
+        "   WHERE c.hasta <= %(a)s ORDER BY c.hasta DESC LIMIT s.observaciones) o),"
+        " (SELECT max(o.factor_observado) FROM (SELECT c.factor_observado FROM v_bateria_calibracion c"
+        "   WHERE c.hasta <= %(a)s ORDER BY c.hasta DESC LIMIT s.observaciones) o)"
+        " FROM bateria_factor_sugerido(%(a)s) s", {"a": ahora}).fetchone()
+    assert fila is not None
+    return Parametros(ahora, vigentes, cambios, Calibracion(fila[0], fila[2], fila[1], fila[3], fila[4]))
+
+
+def parametro_registrado(conn: psycopg.Connection, id_: int) -> tuple[str, Decimal, date, str] | None:
+    fila = conn.execute("SELECT p.clave, p.valor, lower(p.vigencia), k.unidad FROM bateria_parametro p"
+                        " JOIN bateria_parametro_clave k USING (clave) WHERE p.id = %s", (id_,)).fetchone()
+    return None if fila is None else (fila[0], fila[1], fila[2], fila[3])
+
+
+# --- Avisos (7.7) ------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AvisoActivo:
+    clave: str
+    nivel: str
+    titulo: str
+    detalle: str
+    desde: datetime | None
+    regla: str
+    accion: str | None
+
+
+@dataclass(frozen=True)
+class AvisoResuelto:
+    titulo: str
+    detalle: str | None
+    inicio: datetime
+    fin: datetime
+
+
+@dataclass
+class Avisos:
+    ahora: datetime
+    activos: list[AvisoActivo]
+    resueltos: list[AvisoResuelto]
+
+
+def avisos(conn: psycopg.Connection, ahora: datetime) -> Avisos:
+    activos = [AvisoActivo(*f) for f in conn.execute(
+        "SELECT a.clave, a.nivel, a.titulo, a.detalle, coalesce(a.desde, h.inicio), a.regla, a.accion"
+        " FROM bateria_avisos(%s) a LEFT JOIN aviso_historial h ON h.clave = a.clave AND h.fin IS NULL", (ahora,))]
+    orden = {n: i for i, n in enumerate(NIVELES)}
+    activos.sort(key=lambda a: orden.get(a.nivel, 9))
+    resueltos = [AvisoResuelto(*f) for f in conn.execute(
+        "SELECT titulo, detalle, inicio, fin FROM aviso_historial WHERE fin IS NOT NULL AND fin <= %(a)s"
+        " AND fin > %(a)s - interval '7 days' ORDER BY fin DESC", {"a": ahora})]
+    return Avisos(ahora, activos, resueltos)

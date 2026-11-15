@@ -32,6 +32,7 @@ ICONOS = {
     "salud": '<path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>',
     "rayo": '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path>',
     "ok": '<path d="M20 6 9 17l-5-5"></path>',
+    "info": '<circle cx="12" cy="12" r="9"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>',
     "alerta": '<path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17'
               'a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path>',
 }
@@ -123,12 +124,6 @@ def banner(clase: str, texto: Html | str, enlace: tuple[str, str] | None = None)
                                                                       else "#F85149")
     extra = h(' <a href="{}">{}</a>', *enlace) if enlace else Html("")
     return h('<section role="status" class="banner {}">{}<p>{}{}</p></section>', clase, simbolo, texto, extra)
-
-
-def en_preparacion(titulo: str) -> Html:
-    return h('<section class="pn"><div class="ph"><h2 class="pt">{}</h2></div>'
-             '<p class="vacio">Esta pantalla llega en la v0.5.5. Mientras tanto, usa el CLI'
-             ' (docs/parametros.md, «Batería»).</p></section>', titulo)
 
 
 def error_pagina(marco: Marco, titulo: str, texto: str) -> Html:

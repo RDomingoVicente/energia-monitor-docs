@@ -602,7 +602,7 @@ def test_registrar_excepcion(conn: psycopg.Connection, limpio: None, x: bateria_
 @pytest.mark.parametrize("dia", [date(2026, 11, 21), date(2026, 11, 22)], ids=["sabado_null", "domingo_sin_fila"])
 def test_sin_salida_en_dia_sin_salida_se_rechaza(conn: psycopg.Connection, limpio: None, dia: date) -> None:
     _horario(conn)
-    with pytest.raises(bateria_servicio.ErrorExcepcion, match="el horario no tiene salida"):
+    with pytest.raises(bateria_servicio.ErrorExcepcion, match="ya no tiene salida según tu horario"):
         bateria_servicio.registrar_excepcion(conn, NX("sin_salida", dia), AHORA)
     assert conn.execute("SELECT count(*) FROM bateria_excepcion").fetchone() == (0,)
 

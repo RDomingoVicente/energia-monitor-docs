@@ -8,3 +8,6 @@ build/
 dist/
 # Certificados TLS del formulario (deploy/README.md).
 certs/
+tests/ui/.certs/
+# Capturas de tests/ui/capturas.py.
+/capturas/

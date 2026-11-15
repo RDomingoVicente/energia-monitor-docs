@@ -36,8 +36,10 @@ Antes de cualquier cambio, leer:
   `formulario_rw`) y CLI `bateria carga-externa`. v0.5.3: migración 0017,
   cierre `sin_muestreo` para sesiones anteriores al muestreo. Paso 3b,
   primera entrega (v0.5.4): servicio `formulario` (HTTPS, Inicio y lectura;
-  `src/energia_monitor/formulario/`, deploy/README.md). Pendiente la v0.5.5
-  (resto de pantallas y Playwright). La etapa 3 no se empieza hasta nuevo aviso.
+  `src/energia_monitor/formulario/`, deploy/README.md). Paso 3b, segunda
+  entrega (v0.5.5): resto de pantallas y tests de interfaz con Playwright
+  (tests/ui/, solo en local). Falta el paso 4 (dashboard de batería). La
+  etapa 3 no se empieza hasta nuevo aviso.
 
 ## Estructura
 
@@ -54,6 +56,10 @@ Antes de cualquier cambio, leer:
 - Tests (igual que en CI):   docker build --target test .
 - Tests en local:            pip install -e . pytest && pytest
 - Imagen de ejecución:       docker build -t energia-monitor:dev .
+- Tests de interfaz (local, fuera de la CI):
+  docker build -f tests/ui/Dockerfile --target test-ui .
+- Capturas junto a las maquetas:
+  docker build -f tests/ui/Dockerfile --target capturas --output type=local,dest=capturas .
 
 ## Convenciones
 

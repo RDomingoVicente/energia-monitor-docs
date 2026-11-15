@@ -27,7 +27,14 @@ class ErrorLectura(Exception):
 
 
 class ErrorExcepcion(Exception):
-    """Excepción no válida; el formulario la devuelve como 422 con este mensaje."""
+    """Excepción no válida; el formulario la devuelve como 422 con este mensaje junto al campo `campo`."""
+
+    def __init__(self, mensaje: str, campo: str | None = None) -> None:
+        super().__init__(mensaje)
+        self.campo = campo
+
+
+DIAS_LARGOS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
 def recalcular(conn: psycopg.Connection, ahora: datetime | None = None) -> int:
@@ -75,10 +82,8 @@ def instante_local(texto: str) -> InstanteLocal:
     return InstanteLocal(local.astimezone(UTC), ambigua)
 
 
-def registrar_lectura(conn: psycopg.Connection, *, instante: datetime, pct: Decimal, origen: str,
-                      nota: str | None = None, ahora: datetime | None = None) -> int:
-    """Alta de una lectura y recálculo, en una transacción. Devuelve su id."""
-    ahora = ahora or datetime.now(UTC)
+def _insertar_lectura(conn: psycopg.Connection, instante: datetime, pct: Decimal, origen: str, nota: str | None,
+                      ahora: datetime, corrige: int | None = None) -> int:
     if not Decimal(0) <= pct <= Decimal(100):
         raise ErrorLectura(f"porcentaje fuera de 0 a 100: {pct}")
     if instante > ahora:
@@ -86,14 +91,52 @@ def registrar_lectura(conn: psycopg.Connection, *, instante: datetime, pct: Deci
     try:
         with conn.transaction():
             fila = conn.execute(
-                "INSERT INTO bateria_lectura (instante, pct, origen, nota) VALUES (%s, %s, %s, %s) RETURNING id",
-                (instante, pct, origen, nota),
+                "INSERT INTO bateria_lectura (instante, pct, origen, nota, corrige) VALUES (%s, %s, %s, %s, %s)"
+                " RETURNING id",
+                (instante, pct, origen, nota, corrige),
             ).fetchone()
-            recalcular(conn, ahora)
     except psycopg.errors.UniqueViolation as e:
         raise ErrorLectura(f"ya hay una lectura el {_local(instante)}; anúlala o elige otra hora") from e
     assert fila is not None
     return int(fila[0])
+
+
+def registrar_lectura(conn: psycopg.Connection, *, instante: datetime, pct: Decimal, origen: str,
+                      nota: str | None = None, ahora: datetime | None = None) -> int:
+    """Alta de una lectura y recálculo, en una transacción. Devuelve su id."""
+    ahora = ahora or datetime.now(UTC)
+    with conn.transaction():
+        ident = _insertar_lectura(conn, instante, pct, origen, nota, ahora)
+        recalcular(conn, ahora)
+    return ident
+
+
+def _anular_lectura(conn: psycopg.Connection, id_: int, motivo: str) -> None:
+    if not motivo.strip():
+        raise ErrorLectura("anular exige un motivo")
+    fila = conn.execute("UPDATE bateria_lectura SET anulada_en = now(), motivo = %s"
+                        " WHERE id = %s AND anulada_en IS NULL RETURNING id", (motivo.strip(), id_)).fetchone()
+    if fila is None:
+        raise ErrorLectura(f"no hay ninguna lectura activa con id {id_}")
+
+
+def anular_lectura(conn: psycopg.Connection, id_: int, motivo: str, ahora: datetime | None = None) -> None:
+    """Baja lógica con motivo y recálculo. Las lecturas no se borran."""
+    with conn.transaction():
+        _anular_lectura(conn, id_, motivo)
+        recalcular(conn, ahora)
+
+
+def corregir_lectura(conn: psycopg.Connection, id_: int, *, instante: datetime, pct: Decimal, origen: str,
+                     nota: str | None = None, ahora: datetime | None = None) -> int:
+    """Corregir (formulario-maquetas.md, 7.4): anula la lectura con motivo «corregida» y da de alta la
+    nueva (corrige = id), en una transacción. Si el alta falla, la anterior sigue activa. Devuelve el id nuevo."""
+    ahora = ahora or datetime.now(UTC)
+    with conn.transaction():
+        _anular_lectura(conn, id_, "corregida")
+        nuevo = _insertar_lectura(conn, instante, pct, origen, nota, ahora, corrige=id_)
+        recalcular(conn, ahora)
+    return nuevo
 
 
 def actualizar_avisos_sin_fallar(conn: psycopg.Connection) -> None:
@@ -131,17 +174,18 @@ def _validar_excepcion(conn: psycopg.Connection, x: NuevaExcepcion) -> None:
         fila = conn.execute("SELECT hora_salida FROM bateria_horario WHERE dia_iso = %s",
                             (x.fecha.isoweekday(),)).fetchone()
         if fila is None or fila[0] is None:
-            raise ErrorExcepcion(f"el horario no tiene salida el {DIAS_SEMANA[x.fecha.weekday()]} {x.fecha:%d/%m}:"
-                                 " no hace falta una excepción sin salida")
+            # Texto de formulario-maquetas.md, 7.2.
+            raise ErrorExcepcion(f"El {DIAS_LARGOS[x.fecha.weekday()]} {x.fecha:%d/%m} ya no tiene salida según "
+                                 "tu horario", "fecha")
     elif x.tipo == "con_salida":
         if x.hora_salida is None:
-            raise ErrorExcepcion("con salida: falta la hora de salida")
+            raise ErrorExcepcion("con salida: falta la hora de salida", "hora")
         if x.consumo_modo == "normal":
             if x.km is not None or x.pct is not None:
-                raise ErrorExcepcion("consumo normal: no se indican km ni %")
+                raise ErrorExcepcion("consumo normal: no se indican km ni %", "consumo")
         elif x.consumo_modo == "indicado":
             if (x.km is None) == (x.pct is None):
-                raise ErrorExcepcion("consumo indicado: hay que dar km o %, uno de los dos")
+                raise ErrorExcepcion("con «Indicar consumo», indica km o %, uno de los dos", "consumo")
         else:
             raise ErrorExcepcion(f"modo de consumo no válido: {x.consumo_modo!r} (normal o indicado)")
     else:
@@ -158,7 +202,7 @@ def _insertar_excepcion(conn: psycopg.Connection, x: NuevaExcepcion) -> int:
                 (x.tipo, x.fecha, x.hora_salida, x.consumo_modo, x.km, x.pct, x.pct_objetivo, x.nota),
             ).fetchone()
     except psycopg.errors.UniqueViolation as e:
-        raise ErrorExcepcion(f"ya hay una excepción activa el {x.fecha:%d/%m/%Y}; modifícala") from e
+        raise ErrorExcepcion(f"ya hay una excepción activa el {x.fecha:%d/%m/%Y}; modifícala", "fecha") from e
     except psycopg.errors.CheckViolation as e:
         raise ErrorExcepcion(f"excepción no válida: {e.diag.constraint_name}") from e
     assert fila is not None
@@ -196,11 +240,31 @@ def modificar_excepcion(conn: psycopg.Connection, id_: int, x: NuevaExcepcion, a
     return nuevo
 
 
+# --- Horario (7.3) --------------------------------------------------------------------------------
+
+
+def guardar_horario(conn: psycopg.Connection, dias: dict[int, time | None], ahora: datetime | None = None) -> None:
+    """Los 7 días (1 = lunes; None: sin salida) en una transacción, sin vigencia: se aplican desde ya."""
+    if sorted(dias) != list(range(1, 8)):
+        raise ValueError("el horario necesita los 7 días (1 a 7)")
+    with conn.transaction():
+        for dia, hora in sorted(dias.items()):
+            conn.execute(
+                "INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES (%s, %s)"
+                " ON CONFLICT (dia_iso) DO UPDATE SET hora_salida = EXCLUDED.hora_salida, actualizado_en = now()",
+                (dia, hora))
+        recalcular(conn, ahora)
+
+
 # --- Cargas externas (0016) --------------------------------------------------------------------
 
 
 class ErrorCargaExterna(Exception):
-    """Carga externa no válida; el formulario la devuelve como 422 con este mensaje."""
+    """Carga externa no válida; el formulario la devuelve como 422 con este mensaje junto al campo `campo`."""
+
+    def __init__(self, mensaje: str, campo: str | None = None) -> None:
+        super().__init__(mensaje)
+        self.campo = campo
 
 
 @dataclass(frozen=True)
@@ -213,11 +277,11 @@ class NuevaCargaExterna:
 
 def _validar_carga_externa(conn: psycopg.Connection, x: NuevaCargaExterna, ahora: datetime) -> None:
     if x.instante > ahora:
-        raise ErrorCargaExterna(f"la carga externa no puede ser futura ({_local(x.instante)})")
+        raise ErrorCargaExterna(f"la carga externa no puede ser futura ({_local(x.instante)})", "hora")
     if x.kwh is not None and not Decimal(0) <= x.kwh <= Decimal(150):
-        raise ErrorCargaExterna(f"energía fuera de 0 a 150 kWh: {x.kwh}")
+        raise ErrorCargaExterna(f"energía fuera de 0 a 150 kWh: {x.kwh}", "kwh")
     if x.coste_eur is not None and x.coste_eur < 0:
-        raise ErrorCargaExterna(f"coste negativo: {x.coste_eur}")
+        raise ErrorCargaExterna(f"coste negativo: {x.coste_eur}", "coste_eur")
     # Desconectado de casa: el último estado del conector hasta ese instante es libre (1, 2) y antes
     # estuvo conectado (como un trayecto, E2.4). Se mira cargador_estado, no bateria_trayecto, para no
     # depender de un recálculo.
@@ -228,7 +292,7 @@ def _validar_carga_externa(conn: psycopg.Connection, x: NuevaCargaExterna, ahora
         "SELECT EXISTS (SELECT 1 FROM cargador_estado WHERE detectado_en < %s AND estado BETWEEN 3 AND 8)",
         (x.instante,)).fetchone()
     if fila is None or fila[0] not in (1, 2) or not (antes and antes[0]):
-        raise ErrorCargaExterna("A esa hora el coche estaba conectado en casa")
+        raise ErrorCargaExterna("A esa hora el coche estaba conectado en casa", "hora")
 
 
 def _insertar_carga_externa(conn: psycopg.Connection, x: NuevaCargaExterna, origen: str, ahora: datetime,
@@ -242,7 +306,7 @@ def _insertar_carga_externa(conn: psycopg.Connection, x: NuevaCargaExterna, orig
                 (x.instante, x.kwh, x.coste_eur, x.nota, origen, corrige),
             ).fetchone()
     except psycopg.errors.UniqueViolation as e:
-        raise ErrorCargaExterna(f"ya hay una carga externa el {_local(x.instante)}") from e
+        raise ErrorCargaExterna(f"ya hay una carga externa el {_local(x.instante)}", "hora") from e
     except psycopg.errors.CheckViolation as e:
         raise ErrorCargaExterna(f"carga externa no válida: {e.diag.constraint_name}") from e
     assert fila is not None

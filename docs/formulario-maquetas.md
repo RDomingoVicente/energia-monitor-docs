@@ -168,9 +168,14 @@ Maquetas 01a, 01b, 01c.
 
 Maqueta 02.
 
-- Escritorio: tabla de próximas (fecha + nota, tipo, salida, consumo previsto
+- Escritorio: tabla de próximas (fecha, tipo, salida, consumo previsto
   con su origen, objetivo, Modificar / Dar de baja) y de pasadas de 30 días
   (previsto, estimado real, desvío, estado); formulario a la derecha.
+  Cambio del 15/11/2026 respecto a la maqueta: la nota no va bajo la fecha
+  sino en una fila propia a todo el ancho bajo su excepción (texto pequeño
+  en gris, sin borde entre las dos filas), también si es corta; en una
+  columna tan estrecha una nota larga salía palabra a palabra. En móvil no
+  cambia.
 - Tipos: **Con salida** y **Sin salida** (sección 8).
 - Con salida: fecha, hora de salida; consumo previsto con dos opciones,
   **Normal (P75) · 31,0 kWh** marcada por defecto, o **Indicar consumo** (km o
@@ -307,6 +312,9 @@ aviso «¿Cargaste fuera de casa?».
   la cabecera del panel.
 - Texto fijo: al volver hay que anotar una lectura; sin kWh, el intervalo
   queda fuera de la mediana y del P75.
+- Desviación aceptada (15/11/2026): el recuadro bajo la lista («Si al anotar
+  una lectura…») va en azul con el icono de información, no en ámbar como
+  en la maqueta 08. El ámbar queda solo para los avisos activos.
 
 ## 8. Cambios al modelo derivados de la revisión
 
@@ -350,8 +358,15 @@ aviso «¿Cargaste fuera de casa?».
 
 ## 9. Criterios de aceptación de las pantallas
 
-Estado: Inicio (7.1) hecho en v0.5.4; el resto de pantallas, en v0.5.5 (hasta
-entonces muestran «Esta pantalla llega en la v0.5.5»).
+Estado: Inicio (7.1) hecho en v0.5.4; el resto de pantallas, en v0.5.5.
+
+Comprobación en local (fuera de la CI):
+
+- Desbordamiento: `docker build -f tests/ui/Dockerfile --target test-ui .`
+- Capturas de cada pantalla junto a su maqueta, en los dos tamaños:
+  `docker build -f tests/ui/Dockerfile --target capturas --output type=local,dest=capturas .`
+  (en móvil, la barra inferior fija aparece a media página en las capturas
+  de página completa; es un efecto de la captura).
 
 
 - Cada pantalla reproduce la maqueta en 1280×900 y 390×844 (mismos bloques,

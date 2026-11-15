@@ -13,20 +13,25 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal, InvalidOperation
 from importlib import resources
 from urllib.parse import parse_qs, urlsplit
 
 import psycopg
 
-from energia_monitor import __version__, bateria_servicio, db
+from energia_monitor import __version__, bateria_servicio, db, parametros
 from energia_monitor.formulario import datos
 from energia_monitor.formulario.html import Html
-from energia_monitor.formulario.pantallas import inicio
-from energia_monitor.formulario.plantilla import Marco, en_preparacion, error_pagina, pagina
+from energia_monitor.formulario import formato
+from energia_monitor.formulario.pantallas import ayuda
+from energia_monitor.formulario.pantallas import avisos as pantalla_avisos
+from energia_monitor.formulario.pantallas import carga_externa, excepciones, historial, horario, inicio
+from energia_monitor.formulario.pantallas import parametros as pantalla_parametros
+from energia_monitor.formulario.plantilla import Marco, banner, error_pagina, pagina
 
 log = logging.getLogger(__name__)
 
@@ -38,11 +43,6 @@ SEGURIDAD = {
     "Referrer-Policy": "same-origin",
     "X-Frame-Options": "DENY",
 }
-# Pantallas de la v0.5.5 (formulario-maquetas.md, 7.2 a 7.8).
-EN_PREPARACION = {"/excepciones": ("excepciones", "Excepciones"), "/horario": ("horario", "Horario"),
-                  "/historial": ("historial", "Historial"), "/parametros": ("parametros", "Parámetros"),
-                  "/ayuda": ("ayuda", "Ayuda"), "/avisos": ("avisos", "Avisos"),
-                  "/carga-externa": ("", "Carga externa")}
 
 
 @dataclass(frozen=True)
@@ -121,18 +121,46 @@ class App:
         if p.metodo == "POST":
             if not self._mismo_origen(p):
                 return _texto(403, "Origen no admitido")
-            if p.camino == "/lectura":
-                return self._con_bd(lambda conn, marco: self.post_lectura(conn, marco, p))
+            for patron, accion in self.rutas_post():
+                m = re.fullmatch(patron, p.camino)
+                if m:
+                    return self._con_bd(lambda conn, marco: accion(conn, marco, p, *m.groups()))
             return _texto(404, "No encontrado")
         if p.metodo != "GET":
             return _texto(405, "Método no admitido")
         if p.camino == "/":
             return self._con_bd(lambda conn, marco: self.get_inicio(conn, marco, p))
-        if p.camino in EN_PREPARACION:
-            activa, titulo = EN_PREPARACION[p.camino]
+        if p.camino == "/excepciones":
+            return self._con_bd(lambda conn, marco: self.get_excepciones(conn, marco, p))
+        if p.camino == "/historial":
+            return self._con_bd(lambda conn, marco: self.get_historial(conn, marco, p))
+        if p.camino == "/carga-externa":
+            return self._con_bd(lambda conn, marco: self.get_carga_externa(conn, marco, p))
+        if p.camino == "/horario":
+            return self._con_bd(lambda conn, marco: self.get_horario(conn, marco, p))
+        if p.camino == "/parametros":
+            return self._con_bd(lambda conn, marco: self.get_parametros(conn, marco, p))
+        if p.camino == "/avisos":
             return self._con_bd(lambda conn, marco: _html(200, pagina(
-                marco, activa, p.camino.strip("/"), en_preparacion(titulo), titulo)))
+                marco, "avisos", "avisos", pantalla_avisos.pantalla(datos.avisos(conn, self.reloj())), "Avisos")))
+        if p.camino == "/ayuda":
+            return self._con_bd(lambda conn, marco: self.get_ayuda(conn, marco, p))
         return _texto(404, "No encontrado")
+
+    def rutas_post(self) -> list[tuple[str, Callable[..., Respuesta]]]:
+        return [
+            (r"/lectura", self.post_lectura),
+            (r"/excepciones", self.post_excepcion),
+            (r"/excepciones/(\d+)/modificar", self.post_excepcion),
+            (r"/excepciones/(\d+)/baja", self.post_baja_excepcion),
+            (r"/lecturas/(\d+)/corregir", self.post_corregir_lectura),
+            (r"/lecturas/(\d+)/anular", self.post_anular_lectura),
+            (r"/carga-externa", self.post_carga_externa),
+            (r"/carga-externa/(\d+)/corregir", self.post_carga_externa),
+            (r"/carga-externa/(\d+)/anular", self.post_anular_carga_externa),
+            (r"/horario", self.post_horario),
+            (r"/parametros", self.post_parametros),
+        ]
 
     def _mismo_origen(self, p: Peticion) -> bool:
         propio = f"https://{self.config.host}".lower()
@@ -180,30 +208,15 @@ class App:
     def get_inicio(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
                    form: inicio.FormLectura | None = None, estado: int = 200) -> Respuesta:
         d = datos.inicio(conn, self.reloj())
-        consulta = p.consulta
-        ident = consulta.get("id", [""])[0]
-        if form is None and consulta.get("ok") == ["lectura"] and ident.isdigit():
-            d.lectura_guardada = datos.lectura_guardada(conn, int(ident))
+        ok = _ok(p)
+        if form is None and ok is not None and ok[0] == "lectura":
+            d.lectura_guardada = datos.lectura_guardada(conn, ok[1])
         return _html(estado, pagina(marco, "inicio", "inicio", inicio.pantalla(d, form), "Inicio"))
 
     def post_lectura(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
         v = p.formulario()
         form = inicio.FormLectura(v.get("pct", ""), v.get("fecha", ""), v.get("hora", ""))
-        pct: Decimal | None = None
-        try:
-            pct = Decimal(form.pct)
-            if pct != pct.to_integral_value() or not 0 <= pct <= 100:
-                raise InvalidOperation
-        except (InvalidOperation, ValueError):
-            form.errores["pct"] = "Indica un porcentaje entero de 0 a 100."
-        instante = None
-        if not form.fecha or not form.hora:
-            form.errores["fecha" if not form.fecha else "hora"] = "Indica la fecha y la hora de la lectura."
-        else:
-            try:
-                instante = bateria_servicio.instante_local(f"{form.fecha} {form.hora}").instante
-            except bateria_servicio.ErrorLectura as e:
-                form.errores["hora"] = _frase(str(e))
+        pct, instante = _pct_e_instante(form.pct, form.fecha, form.hora, form.errores)
         if form.errores or pct is None or instante is None:
             return self.get_inicio(conn, marco, p, form, 422)
         try:
@@ -212,7 +225,368 @@ class App:
         except bateria_servicio.ErrorLectura as e:
             form.errores["general"] = _frase(str(e))
             return self.get_inicio(conn, marco, p, form, 422)
-        return Respuesta(303, cabeceras={"Location": f"/?ok=lectura&id={ident}", "Cache-Control": "no-store"})
+        return _redirigir(f"/?ok=lectura&id={ident}")
+
+
+    # --- Excepciones (7.2) ------------------------------------------------------------------
+
+    def get_excepciones(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
+                        form: excepciones.FormExcepcion | None = None, estado: int = 200) -> Respuesta:
+        d = datos.excepciones(conn, self.reloj())
+        if form is None:
+            form = excepciones.FormExcepcion()
+            ident = p.consulta.get("modificar", [""])[0]
+            x = datos.excepcion(conn, int(ident), activa=True) if ident.isdigit() and len(ident) < 12 else None
+            if x is not None:
+                form = excepciones.FormExcepcion(
+                    x["tipo"], x["fecha"].isoformat(), x["hora_salida"].strftime("%H:%M") if x["hora_salida"] else "",
+                    x["consumo_modo"] or "normal", _entero_texto(x["km"]), _entero_texto(x["pct"]),
+                    _entero_texto(x["pct_objetivo"]), x["nota"] or "", x["id"])
+        avisos = []
+        ok = _ok(p) if estado == 200 else None
+        if ok is not None:
+            texto = self._mensaje_excepcion(conn, *ok)
+            if texto:
+                avisos.append(banner("ok", texto))
+        for x in d.proximas:
+            if x.recortado:
+                avisos.append(banner("aviso", f"Objetivo por encima del tope: el del {formato.DIAS[x.fecha.weekday()]} "
+                                              f"{x.fecha:%d/%m} se recorta al tope ({formato.pct(d.plan.tope_pct)})."))
+        return _html(estado, pagina(marco, "excepciones", "excepciones",
+                                    excepciones.pantalla(d, form, avisos), "Excepciones"))
+
+    def _mensaje_excepcion(self, conn: psycopg.Connection, codigo: str, ident: int) -> str | None:
+        if codigo == "excepcion":
+            x = datos.excepcion(conn, ident, activa=True)
+            if x is None:
+                return None
+            dia = f"{formato.DIAS[x['fecha'].weekday()]} {x['fecha']:%d/%m}"
+            if x["tipo"] == "sin_salida":
+                return f"Excepción guardada: {dia}, sin salida."
+            return f"Excepción guardada: {dia}, con salida a las {x['hora_salida']:%H:%M}."
+        if codigo == "baja":
+            x = datos.excepcion(conn, ident, activa=False)
+            if x is None:
+                return None
+            return f"Excepción del {formato.DIAS[x['fecha'].weekday()]} {x['fecha']:%d/%m} dada de baja."
+        return None
+
+    def post_excepcion(self, conn: psycopg.Connection, marco: Marco, p: Peticion, ident: str | None = None) -> Respuesta:
+        v = p.formulario()
+        form = excepciones.FormExcepcion(
+            v.get("tipo", ""), v.get("fecha", ""), v.get("hora", ""), v.get("consumo", "normal"), v.get("km", ""),
+            v.get("pct", ""), v.get("pct_objetivo", ""), v.get("nota", ""), int(ident) if ident else None)
+        nueva = _excepcion_desde_form(form)
+        if nueva is None:
+            return self.get_excepciones(conn, marco, p, form, 422)
+        try:
+            if ident is None:
+                nuevo = bateria_servicio.registrar_excepcion(conn, nueva, self.reloj())
+            else:
+                nuevo = bateria_servicio.modificar_excepcion(conn, int(ident), nueva, self.reloj())
+        except bateria_servicio.ErrorExcepcion as e:
+            form.errores[e.campo or "general"] = _frase(str(e))
+            return self.get_excepciones(conn, marco, p, form, 422)
+        return _redirigir(f"/excepciones?ok=excepcion&id={nuevo}")
+
+    def post_baja_excepcion(self, conn: psycopg.Connection, marco: Marco, p: Peticion, ident: str) -> Respuesta:
+        try:
+            bateria_servicio.anular_excepcion(conn, int(ident), self.reloj())
+        except bateria_servicio.ErrorExcepcion as e:
+            form = excepciones.FormExcepcion(errores={"general": _frase(str(e))})
+            return self.get_excepciones(conn, marco, p, form, 422)
+        return _redirigir(f"/excepciones?ok=baja&id={ident}")
+
+
+    # --- Historial (7.4) --------------------------------------------------------------------
+
+    def get_historial(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
+                      corregir: historial.FormCorregir | None = None, estado: int = 200) -> Respuesta:
+        c = p.consulta
+        periodo = c.get("periodo", ["30"])[0]
+        dias = None if periodo == "todo" else (90 if periodo == "90" else 30)
+        d = datos.historial(conn, self.reloj(), dias, c.get("anuladas", [""])[0] == "1")
+        avisos = []
+        ok = _ok(p) if estado == 200 else None
+        if ok is not None:
+            lec = datos.lectura(conn, ok[1])
+            if ok[0] == "corregida" and lec is not None and lec["anulada_en"] is None and lec["corrige"] is not None:
+                avisos.append(banner("ok", f"Lectura corregida: {formato.pct(lec['pct'])} el "
+                                           f"{formato.dia_hora(lec['instante'])}; la anterior queda anulada."))
+            elif ok[0] == "anulada" and lec is not None and lec["anulada_en"] is not None:
+                avisos.append(banner("ok", f"Lectura del {formato.dia_hora(lec['instante'])} anulada."))
+        if corregir is None:
+            for accion in ("corregir", "anular"):
+                ident = c.get(accion, [""])[0]
+                lec = datos.lectura(conn, int(ident)) if ident.isdigit() and len(ident) < 12 else None
+                if lec is not None and lec["anulada_en"] is None:
+                    local = formato.local(lec["instante"])
+                    corregir = historial.FormCorregir(accion, lec, _entero_texto(lec["pct"]), f"{local:%Y-%m-%d}",
+                                                      f"{local:%H:%M}", lec["nota"] or "")
+        return _html(estado, pagina(marco, "historial", "historial", historial.pantalla(d, avisos, corregir),
+                                    "Historial"))
+
+    def post_corregir_lectura(self, conn: psycopg.Connection, marco: Marco, p: Peticion, ident: str) -> Respuesta:
+        lec = datos.lectura(conn, int(ident))
+        if lec is None or lec["anulada_en"] is not None:
+            return _texto(404, "No hay ninguna lectura activa con ese id")
+        v = p.formulario()
+        form = historial.FormCorregir("corregir", lec, v.get("pct", ""), v.get("fecha", ""), v.get("hora", ""),
+                                      v.get("nota", "")[:80])
+        pct, instante = _pct_e_instante(form.pct, form.fecha, form.hora, form.errores)
+        if form.errores or pct is None or instante is None:
+            return self.get_historial(conn, marco, p, form, 422)
+        try:
+            nuevo = bateria_servicio.corregir_lectura(conn, lec["id"], instante=instante, pct=pct, origen="formulario",
+                                                      nota=form.nota or None, ahora=self.reloj())
+        except bateria_servicio.ErrorLectura as e:
+            form.errores["general"] = _frase(str(e))
+            return self.get_historial(conn, marco, p, form, 422)
+        return _redirigir(f"/historial?ok=corregida&id={nuevo}")
+
+    def post_anular_lectura(self, conn: psycopg.Connection, marco: Marco, p: Peticion, ident: str) -> Respuesta:
+        lec = datos.lectura(conn, int(ident))
+        if lec is None or lec["anulada_en"] is not None:
+            return _texto(404, "No hay ninguna lectura activa con ese id")
+        motivo = p.formulario().get("motivo", "")[:80]
+        form = historial.FormCorregir("anular", lec, motivo=motivo)
+        if not motivo:
+            form.errores["motivo"] = "Indica el motivo."
+            return self.get_historial(conn, marco, p, form, 422)
+        bateria_servicio.anular_lectura(conn, lec["id"], motivo, self.reloj())
+        return _redirigir(f"/historial?ok=anulada&id={ident}")
+
+
+    # --- Carga externa (7.8) ----------------------------------------------------------------
+
+    def get_carga_externa(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
+                          form: carga_externa.FormCarga | None = None, estado: int = 200) -> Respuesta:
+        ahora = self.reloj()
+        d = datos.cargas_externas(conn, ahora)
+        c = p.consulta
+        if form is None:
+            local = formato.local(ahora)
+            form = carga_externa.FormCarga(f"{local:%Y-%m-%d}", f"{local:%H:%M}")
+            for accion in ("corregir", "anular"):
+                ident = c.get(accion, [""])[0]
+                x = datos.carga_externa(conn, int(ident)) if ident.isdigit() and len(ident) < 12 else None
+                if x is not None and x["anulada_en"] is None:
+                    lx = formato.local(x["instante"])
+                    form = carga_externa.FormCarga(
+                        f"{lx:%Y-%m-%d}", f"{lx:%H:%M}", _decimal_texto(x["kwh"]), _decimal_texto(x["coste_eur"]),
+                        x["nota"] or "")
+                    if accion == "corregir":
+                        form.corregir = x["id"]
+                    else:
+                        form.anular = x["id"]
+                        form.titulo_anular = formato.dia_hora(x["instante"])
+        avisos = []
+        ok = _ok(p) if estado == 200 else None
+        if ok is not None:
+            x = datos.carga_externa(conn, ok[1])
+            if x is not None:
+                energia = formato.kwh(x["kwh"]) if x["kwh"] is not None else "sin kWh"
+                if ok[0] in ("externa", "externa_corregida") and x["anulada_en"] is None:
+                    verbo = "corregida" if ok[0] == "externa_corregida" else "guardada"
+                    avisos.append(banner("ok", f"Carga externa {verbo}: {energia} el {formato.dia_hora(x['instante'])}. "
+                                               "Al volver, anota el % que marca el coche."))
+                elif ok[0] == "externa_anulada" and x["anulada_en"] is not None:
+                    avisos.append(banner("ok", f"Carga externa del {formato.dia_hora(x['instante'])} anulada."))
+        return _html(estado, pagina(marco, "", "carga-externa", carga_externa.pantalla(d, form, avisos),
+                                    "Carga externa"))
+
+    def post_carga_externa(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
+                           ident: str | None = None) -> Respuesta:
+        v = p.formulario()
+        form = carga_externa.FormCarga(v.get("fecha", ""), v.get("hora", ""), v.get("kwh", ""), v.get("coste_eur", ""),
+                                       v.get("nota", "")[:80], int(ident) if ident else None)
+        if ident is not None:
+            x = datos.carga_externa(conn, int(ident))
+            if x is None or x["anulada_en"] is not None:
+                return _texto(404, "No hay ninguna carga externa activa con ese id")
+        kwh = coste = instante = None
+        try:
+            kwh = Decimal(form.kwh.replace(",", ".")) if form.kwh else None
+            if kwh is not None and (kwh < 0 or kwh > 150 or kwh != kwh.quantize(Decimal("0.1"))):
+                raise InvalidOperation
+        except InvalidOperation:
+            form.errores["kwh"] = "Indica la energía de 0 a 150 kWh, con un decimal como máximo, o déjala vacía."
+        try:
+            coste = Decimal(form.coste_eur.replace(",", ".")) if form.coste_eur else None
+            if coste is not None and (coste < 0 or coste != coste.quantize(Decimal("0.01"))):
+                raise InvalidOperation
+        except InvalidOperation:
+            form.errores["coste_eur"] = "Indica el coste en euros, con dos decimales como máximo, o déjalo vacío."
+        if not form.fecha or not form.hora:
+            form.errores["fecha" if not form.fecha else "hora"] = "Indica la fecha y la hora aproximada."
+        else:
+            try:
+                instante = bateria_servicio.instante_local(f"{form.fecha} {form.hora}").instante
+            except bateria_servicio.ErrorLectura as e:
+                form.errores["hora"] = _frase(str(e))
+        if form.errores or instante is None:
+            return self.get_carga_externa(conn, marco, p, form, 422)
+        nueva = bateria_servicio.NuevaCargaExterna(instante, kwh, coste, form.nota or None)
+        try:
+            if ident is None:
+                nuevo = bateria_servicio.registrar_carga_externa(conn, nueva, "formulario", self.reloj())
+            else:
+                nuevo = bateria_servicio.corregir_carga_externa(conn, int(ident), nueva, "formulario", self.reloj())
+        except bateria_servicio.ErrorCargaExterna as e:
+            form.errores[e.campo or "general"] = _frase(str(e))
+            return self.get_carga_externa(conn, marco, p, form, 422)
+        codigo = "externa" if ident is None else "externa_corregida"
+        return _redirigir(f"/carga-externa?ok={codigo}&id={nuevo}")
+
+    def post_anular_carga_externa(self, conn: psycopg.Connection, marco: Marco, p: Peticion, ident: str) -> Respuesta:
+        x = datos.carga_externa(conn, int(ident))
+        if x is None or x["anulada_en"] is not None:
+            return _texto(404, "No hay ninguna carga externa activa con ese id")
+        motivo = p.formulario().get("motivo", "")[:80]
+        if not motivo:
+            form = carga_externa.FormCarga(anular=x["id"], titulo_anular=formato.dia_hora(x["instante"]),
+                                           errores={"motivo": "Indica el motivo."})
+            return self.get_carga_externa(conn, marco, p, form, 422)
+        bateria_servicio.anular_carga_externa(conn, x["id"], motivo, self.reloj())
+        return _redirigir(f"/carga-externa?ok=externa_anulada&id={ident}")
+
+
+    # --- Horario (7.3) ---------------------------------------------------------------------
+
+    def get_horario(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
+                    form: horario.FormHorario | None = None, estado: int = 200) -> Respuesta:
+        d = datos.horario(conn, self.reloj())
+        avisos = []
+        if estado == 200 and p.consulta.get("ok") == ["horario"]:
+            avisos.append(banner("ok", f"Horario guardado: {horario.resumen_semana(d.dias)}."))
+        if form is not None and form.errores:
+            avisos.append(banner("error", "Revisa las horas marcadas: el horario no se ha guardado."))
+        return _html(estado, pagina(marco, "horario", "horario", horario.pantalla(d, form, avisos), "Horario"))
+
+    def post_horario(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        v = p.formulario()
+        form = horario.FormHorario()
+        dias: dict[int, time | None] = {}
+        for dia in range(1, 8):
+            sale = v.get(f"sale_{dia}") == "1"
+            texto = v.get(f"hora_{dia}", "")
+            form.sale[dia], form.hora[dia] = sale, texto
+            if not sale:
+                dias[dia] = None  # la hora de un día sin salida se ignora
+                continue
+            try:
+                dias[dia] = time.fromisoformat(texto) if texto else None
+            except ValueError:
+                dias[dia] = None
+            if dias[dia] is None:
+                form.errores[dia] = "Indica la hora de salida."
+        if form.errores:
+            return self.get_horario(conn, marco, p, form, 422)
+        bateria_servicio.guardar_horario(conn, dias, self.reloj())
+        return _redirigir("/horario?ok=horario")
+
+
+    # --- Parámetros (7.5) ------------------------------------------------------------------
+
+    def get_parametros(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
+                       form: pantalla_parametros.FormParametro | None = None, estado: int = 200) -> Respuesta:
+        d = datos.parametros(conn, self.reloj())
+        if form is None:
+            clave = p.consulta.get("clave", [""])[0]
+            form = pantalla_parametros.FormParametro(clave if any(x.clave == clave for x in d.vigentes)
+                                                     else "reserva_pct")
+        avisos = []
+        ok = _ok(p) if estado == 200 else None
+        if ok is not None and ok[0] == "parametro":
+            reg = datos.parametro_registrado(conn, ok[1])
+            if reg is not None:
+                clave, valor, desde, unidad = reg
+                avisos.append(banner("ok", f"{clave} = {pantalla_parametros.valor(clave, unidad, valor)} desde el "
+                                           f"{desde:%d/%m/%Y}. La estimación se ha recalculado."))
+        return _html(estado, pagina(marco, "parametros", "parametros",
+                                    pantalla_parametros.pantalla(d, form, avisos), "Parámetros"))
+
+    def post_parametros(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        v = p.formulario()
+        form = pantalla_parametros.FormParametro(v.get("clave", ""), v.get("valor", ""), v.get("desde", ""),
+                                                 v.get("nota", "")[:80])
+        ahora = self.reloj()
+        d = datos.parametros(conn, ahora)
+        elegido = next((x for x in d.vigentes if x.clave == form.clave), None)
+        if elegido is None:
+            form.clave = "reserva_pct"
+            form.errores["clave"] = "Elige un parámetro de la lista."
+            return self.get_parametros(conn, marco, p, form, 422)
+        valor = None
+        try:
+            valor = pantalla_parametros.a_unidad_guardada(elegido, Decimal(form.valor.replace(",", ".")))
+        except InvalidOperation:
+            form.errores["valor"] = f"Indica un número ({pantalla_parametros.unidad_entrada(elegido)})."
+        hoy = formato.local(ahora).date()
+        desde = None
+        try:
+            desde = date.fromisoformat(form.desde)
+            if desde < hoy:
+                form.errores["desde"] = "Desde la página, el valor nuevo vale desde hoy o después."
+        except ValueError:
+            form.errores["desde"] = "Indica la fecha de inicio."
+        if form.errores or valor is None or desde is None:
+            return self.get_parametros(conn, marco, p, form, 422)
+        calibracion = form.clave == "factor_bateria" and form.nota.startswith("calibración sugerida")
+        try:
+            parametros.registrar_parametro_bateria(conn, clave=form.clave, desde=desde, valor=valor,
+                                                   origen="estimado" if calibracion else "usuario",
+                                                   fuente="formulario", nota=form.nota or None)
+        except parametros.ErrorParametro as e:
+            campo = "desde" if "empieza el" in str(e) else "valor"
+            form.errores[campo] = _frase(str(e))
+            return self.get_parametros(conn, marco, p, form, 422)
+        bateria_servicio.recalcular(conn, ahora)
+        ident = conn.execute("SELECT id FROM bateria_parametro WHERE clave = %s AND lower(vigencia) = %s",
+                             (form.clave, desde)).fetchone()
+        return _redirigir(f"/parametros?ok=parametro&id={ident[0] if ident else 0}")
+
+
+    # --- Ayuda (7.6) -----------------------------------------------------------------------
+
+    def get_ayuda(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        ahora = self.reloj()
+        d = ayuda.AyudaDatos(datos.parametros(conn, ahora), datos.plan(conn, ahora), datos.estado(conn, ahora))
+        q = p.consulta.get("q", [""])[0][:60]
+        return _html(200, pagina(marco, "ayuda", "ayuda", ayuda.pantalla(d, q), "Ayuda"))
+
+
+def _decimal_texto(x: Decimal | None) -> str:
+    return "" if x is None else f"{x.normalize():f}"
+
+
+def _pct_e_instante(pct_txt: str, fecha: str, hora: str, errores: dict[str, str]) -> tuple[Decimal | None,
+                                                                                            datetime | None]:
+    """Porcentaje entero 0–100 y fecha y hora de Madrid (la ambigua, la primera); errores por campo."""
+    try:
+        pct = _decimal(pct_txt, 0, 100)
+        if pct is None:
+            raise ValueError
+    except ValueError:
+        errores["pct"] = "Indica un porcentaje entero de 0 a 100."
+        pct = None
+    instante = None
+    if not fecha or not hora:
+        errores["fecha" if not fecha else "hora"] = "Indica la fecha y la hora de la lectura."
+    else:
+        try:
+            instante = bateria_servicio.instante_local(f"{fecha} {hora}").instante
+        except bateria_servicio.ErrorLectura as e:
+            errores["hora"] = _frase(str(e))
+    return pct, instante
+
+
+def _redirigir(destino: str) -> Respuesta:
+    return Respuesta(303, cabeceras={"Location": destino, "Cache-Control": "no-store"})
+
+
+def _entero_texto(x: Decimal | None) -> str:
+    return "" if x is None else f"{x.normalize():f}"
 
 
 def _frase(texto: str) -> str:
@@ -222,3 +596,68 @@ def _frase(texto: str) -> str:
 
 def _ultima_migracion() -> str:
     return max(f.name[:4] for f in db.ficheros_migracion(db.directorio_migraciones()))
+
+
+def _ok(p: Peticion) -> tuple[str, int] | None:
+    """(?ok=código&id=n) tras un POST: solo un código y un id; el texto se monta desde la base de datos."""
+    c = p.consulta
+    codigo, ident = c.get("ok", [""])[0], c.get("id", [""])[0]
+    if re.fullmatch(r"[a-z_]{1,20}", codigo) and ident.isdigit() and len(ident) < 12:
+        return codigo, int(ident)
+    return None
+
+
+def _decimal(texto: str, minimo: int, maximo: int | None) -> Decimal | None:
+    """Entero positivo del formulario; ValueError si no lo es."""
+    if texto == "":
+        return None
+    try:
+        v = Decimal(texto)
+    except InvalidOperation as e:
+        raise ValueError from e
+    if v != v.to_integral_value() or v < minimo or (maximo is not None and v > maximo):
+        raise ValueError
+    return v
+
+
+def _excepcion_desde_form(form: excepciones.FormExcepcion) -> bateria_servicio.NuevaExcepcion | None:
+    """Valida el formato de cada campo (los errores van a form.errores) y arma la excepción."""
+    try:
+        fecha = date.fromisoformat(form.fecha)
+    except ValueError:
+        form.errores["fecha"] = "Indica la fecha."
+        fecha = None
+    if form.nota and len(form.nota) > 80:
+        form.errores["nota"] = "La nota admite 80 caracteres como máximo."
+    if form.tipo == "sin_salida":
+        if form.errores or fecha is None:
+            return None
+        return bateria_servicio.NuevaExcepcion("sin_salida", fecha, nota=form.nota or None)
+    if form.tipo != "con_salida":
+        form.errores["general"] = "Elige el tipo: con salida o sin salida."
+        return None
+    hora = None
+    try:
+        hora = time.fromisoformat(form.hora) if form.hora else None
+    except ValueError:
+        pass
+    if hora is None:
+        form.errores["hora"] = "Indica la hora de salida."
+    km = pct = objetivo = None
+    try:
+        objetivo = _decimal(form.pct_objetivo, 1, 100)
+    except ValueError:
+        form.errores["pct_objetivo"] = "Indica un nivel entero de 1 a 100, o déjalo vacío."
+    modo = "indicado" if form.consumo == "indicado" else "normal"
+    if modo == "indicado":  # con consumo normal, km y % se ignoran (sin JavaScript se envían igual)
+        try:
+            km = _decimal(form.km, 1, None)
+            pct = _decimal(form.pct, 1, 100)
+        except ValueError:
+            form.errores["consumo"] = "Indica los km o el % como un número entero positivo (el % hasta 100)."
+        else:
+            if (km is None) == (pct is None):
+                form.errores["consumo"] = "Con «Indicar consumo», indica km o %, uno de los dos."
+    if form.errores or fecha is None or hora is None:
+        return None
+    return bateria_servicio.NuevaExcepcion("con_salida", fecha, hora, modo, km, pct, objetivo, form.nota or None)

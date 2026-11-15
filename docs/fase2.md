@@ -227,7 +227,18 @@ Entrega:
      tras Tailscale y ACL). Verificado con tests (también TLS con certificado
      caducado, de otro nombre o ausente) y con la imagen contra PostgreSQL en
      local. Pendiente: desplegar en el NAS y abrirla desde el móvil.
-   - v0.5.5: resto de pantallas y Playwright (`test-ui`): pendiente.
+   - v0.5.5: resto de pantallas (Excepciones, Historial, Carga externa,
+     Horario, Parámetros, Avisos y Ayuda), todas con PRG (303 con
+     `?ok=código&id`) y 422 con los mensajes de validación; corregir y
+     anular lecturas y cargas externas, guardar el horario y registrar
+     parámetros y la calibración sugerida pasan por `bateria_servicio`.
+     Verificado con tests de integración contra PostgreSQL (cada
+     formulario, validaciones, contador de avisos, búsqueda en la Ayuda) y
+     con Playwright en local (`tests/ui/Dockerfile`, fuera de la CI):
+     ningún elemento sale de su contenedor en 1280×900 ni en 390×844 en 15
+     vistas, sin errores de consola ni recursos bloqueados por la CSP.
+     Capturas junto a las maquetas con el stage `capturas` del mismo
+     Dockerfile. Pendiente: desplegar en el NAS y probar desde el móvil.
 4. Dashboard de batería (E2.10, segunda parte): pendiente.
 
 ### Objetivo
