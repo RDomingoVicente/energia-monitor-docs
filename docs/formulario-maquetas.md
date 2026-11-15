@@ -11,6 +11,9 @@ que salen de la revisión de las maquetas.
 - `docs/maquetas/*.html`: una página por pantalla y formato (escritorio 1280 px,
   móvil 390 px), estática, con datos de ejemplo. Son la referencia visual: se
   copian estructura, clases y estilos, no los datos.
+- Los valores de los parámetros que muestran las maquetas 05 y 06 son de
+  ejemplo (p. ej. `aviso_sin_lectura_dias` = 2 días, 0,5–7): mandan la tabla
+  de 7.5 y `bateria_parametro_clave`.
 - `docs/maquetas/00-referencia-estados-nivel.html`: lámina de los tres estados
   de la casilla Nivel. No es una pantalla.
 - Datos de ejemplo: un mismo escenario (lectura el sáb 14/11 19:42, carga la
@@ -284,6 +287,7 @@ Maqueta 07.
 | AVISO | Intervalo incoherente | E2.5 | Historial |
 | AVISO | ¿Cargaste fuera de casa? | residuo positivo > `umbral_carga_externa_kwh` en el intervalo que termina en la última lectura | Carga externa |
 | AVISO | Objetivo por encima del tope | objetivo > `tope_pct` | Excepciones |
+| AVISO | Carga completa dudosa | sesión terminada por el coche (evsm) sin muestra en los 180 s siguientes o con un estado que no es 1, 2, 4 ni 8; solo las posteriores al último valor absoluto (E2.3) | Historial |
 | INFO | Calibración sugerida | E2.6 | Parámetros |
 
 ### 7.8 Carga externa (`/carga-externa`)
