@@ -16,7 +16,7 @@ test = ["pytest>=8"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"energia_monitor.formulario" = ["estatico/*.css"]
+"energia_monitor.formulario" = ["estatico/*.css", "estatico/*.ico", "estatico/*.svg", "estatico/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

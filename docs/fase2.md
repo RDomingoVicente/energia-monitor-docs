@@ -226,7 +226,7 @@ Entrega:
      la base de datos), compose y deploy/README.md (certificados, arranque
      tras Tailscale y ACL). Verificado con tests (también TLS con certificado
      caducado, de otro nombre o ausente) y con la imagen contra PostgreSQL en
-     local. Pendiente: desplegar en el NAS y abrirla desde el móvil.
+     local. Desplegada en el NAS y verificada desde el móvil (15/11/2026).
    - v0.5.5: resto de pantallas (Excepciones, Historial, Carga externa,
      Horario, Parámetros, Avisos y Ayuda), todas con PRG (303 con
      `?ok=código&id`) y 422 con los mensajes de validación; corregir y

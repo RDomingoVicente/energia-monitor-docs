@@ -43,6 +43,14 @@ SEGURIDAD = {
     "Referrer-Policy": "same-origin",
     "X-Frame-Options": "DENY",
 }
+# Ficheros estáticos: lista cerrada (ruta → fichero del paquete y tipo). Los iconos van en la raíz porque los
+# navegadores piden /favicon.ico y /apple-touch-icon.png por su cuenta.
+ESTATICOS = {
+    "/estatico/estilo.css": ("estatico/estilo.css", "text/css; charset=utf-8"),
+    "/favicon.ico": ("estatico/favicon.ico", "image/x-icon"),
+    "/favicon.svg": ("estatico/favicon.svg", "image/svg+xml"),
+    "/apple-touch-icon.png": ("estatico/apple-touch-icon.png", "image/png"),
+}
 
 
 @dataclass(frozen=True)
@@ -115,9 +123,10 @@ class App:
             return _texto(421, "Host no admitido")
         if len(p.cuerpo) > MAX_CUERPO:
             return _texto(413, "Petición demasiado grande")
-        if p.camino == "/estatico/estilo.css" and p.metodo == "GET":
-            css = resources.files("energia_monitor.formulario").joinpath("estatico/estilo.css").read_bytes()
-            return Respuesta(200, css, "text/css; charset=utf-8", {"Cache-Control": "public, max-age=86400"})
+        if p.camino in ESTATICOS and p.metodo == "GET":
+            fichero, tipo = ESTATICOS[p.camino]
+            contenido = resources.files("energia_monitor.formulario").joinpath(fichero).read_bytes()
+            return Respuesta(200, contenido, tipo, {"Cache-Control": "public, max-age=86400"})
         if p.metodo == "POST":
             if not self._mismo_origen(p):
                 return _texto(403, "Origen no admitido")

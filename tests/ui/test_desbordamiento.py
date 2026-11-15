@@ -113,3 +113,32 @@ def test_el_detector_encuentra_un_desbordamiento(servidor: str, navegador: objec
     ctx.close()
     assert any("span.prueba" in m for m in malos), malos
     assert any(m.startswith("página: ancho") for m in malos), malos
+
+
+# Lo marcado para el otro tamaño no debe verse (una regla posterior con display: flex anulaba .solo-movil en la
+# Ayuda y la página salía dos veces), y ningún id se repite.
+VISIBILIDAD = """(oculta) => {
+  const malos = [];
+  for (const el of document.querySelectorAll('.' + oculta)) {
+    const r = el.getBoundingClientRect();
+    if (getComputedStyle(el).display !== 'none' && (r.width > 0 || r.height > 0))
+      malos.push(`${el.tagName.toLowerCase()}.${el.className.trim().replace(/\\s+/g, '.')} visible`);
+  }
+  const vistos = new Set();
+  for (const el of document.querySelectorAll('[id]')) {
+    if (vistos.has(el.id)) malos.push(`id repetido: ${el.id}`);
+    vistos.add(el.id);
+  }
+  return malos;
+}"""
+
+
+@pytest.mark.parametrize(("ancho", "alto"), TAMANOS, ids=["escritorio", "movil"])
+@pytest.mark.parametrize("ruta", PANTALLAS)
+def test_solo_se_ve_lo_de_cada_tamano(servidor: str, navegador: object, ruta: str, ancho: int, alto: int) -> None:
+    ctx = navegador.new_context(viewport={"width": ancho, "height": alto}, ignore_https_errors=True)  # type: ignore[attr-defined]
+    pagina = ctx.new_page()
+    pagina.goto(servidor + ruta)
+    malos = pagina.evaluate(VISIBILIDAD, "solo-movil" if ancho >= 900 else "solo-escritorio")
+    ctx.close()
+    assert malos == [], "\n".join(malos)

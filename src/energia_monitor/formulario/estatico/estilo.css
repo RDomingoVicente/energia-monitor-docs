@@ -24,6 +24,10 @@ a { color: var(--acento); }
   padding: 14px 12px; display: flex; flex-direction: column; gap: 4px; }
 .side .marca { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
 .side .marca p { margin: 0; }
+/* Logo (SVG en línea, color por currentColor): mismo azul que el favicon. */
+.logo { flex: none; color: #2F81F7; }
+.logo-lateral { width: 40px; height: 10px; }
+.logo-movil { width: 32px; height: 8px; margin-right: 8px; vertical-align: middle; }
 .side .marca .nombre { font-size: 13px; font-weight: 600; }
 .side .marca .version { font-size: 11px; color: var(--texto-4); }
 .side a { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 6px;
@@ -144,7 +148,8 @@ tr:last-child td { border-bottom: 0; }
 .bateria-movil .cifra .kwh { font-size: 13px; color: var(--texto-3); font-family: var(--mono); }
 .bateria-movil .barra { height: 14px; margin-top: 18px; } .bateria-movil .barra .marca { height: 24px; }
 .bateria-movil .detalle { margin: 10px 0 0; font-size: 12px; color: var(--texto-2); font-family: var(--mono); }
-.coche-necesita { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+/* display: grid solo en móvil (media query): aquí anularía .solo-movil. */
+.coche-necesita { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .coche-necesita .pn { padding: 12px 14px; }
 .coche-necesita .valor { margin: 8px 0 0; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .coche-necesita .valor.kwh { margin-top: 6px; font-size: 22px; font-family: var(--mono); color: var(--acento); }

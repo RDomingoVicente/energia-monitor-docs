@@ -104,6 +104,21 @@ def test_hoja_de_estilos_sin_recursos_externos() -> None:
     assert ".x-100{left:100%}" in css and "@media (max-width: 899px)" in css
 
 
+def test_iconos_en_la_raiz_sin_recursos_externos() -> None:
+    firmas = {"/favicon.ico": ("image/x-icon", b"\x00\x00\x01\x00"), "/apple-touch-icon.png": ("image/png", b"\x89PNG"),
+              "/favicon.svg": ("image/svg+xml", b"<svg")}
+    for ruta, (tipo, inicio) in firmas.items():
+        r = app().manejar(Peticion("GET", ruta, {"host": HOST}))
+        assert r.estado == 200 and r.tipo == tipo and r.cuerpo.startswith(inicio), ruta
+        assert r.cabeceras["Content-Security-Policy"] == CSP
+    svg = app().manejar(Peticion("GET", "/favicon.svg", {"host": HOST})).cuerpo.decode()
+    assert "<script" not in svg and "href" not in svg and "CC BY-SA 4.0" in svg
+    # Lista cerrada: nada más del directorio estático, ni con otro método o Host.
+    assert app().manejar(Peticion("GET", "/estatico/favicon.svg", {"host": HOST})).estado == 404
+    assert app().manejar(Peticion("POST", "/favicon.ico", {"host": HOST, "origin": f"https://{HOST}"})).estado == 404
+    assert app().manejar(Peticion("GET", "/favicon.ico", {"host": "otro"})).estado == 421
+
+
 def test_sin_base_de_datos_503() -> None:
     r = app().manejar(Peticion("GET", "/", {"host": HOST}))
     assert r.estado == 503 and "Base de datos no accesible" in r.cuerpo.decode()

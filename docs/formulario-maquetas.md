@@ -90,6 +90,13 @@ falta energía; marca ámbar en la reserva y blanca en el objetivo.
   Historial, Ajustes) y en la cabecera la hora del recálculo, la campana de
   avisos y «?» (Ayuda). Tablas convertidas en listas.
 - Zonas táctiles ≥ 44 px en móvil.
+- Logo y favicon (añadidos el 15/11/2026, fuera de las maquetas): logo BYD
+  de Arcticons (CC BY-SA 4.0) en azul `#2F81F7`. En escritorio sustituye al
+  rayo de la barra lateral; en móvil ocupa el lugar de «formulario» en la
+  cabecera («logo / inicio»), porque con los dos la ruta no cabía en 390 px.
+  Favicon en `/favicon.ico` (16, 32 y 48 px), `/favicon.svg` y
+  `/apple-touch-icon.png` (180 px), generados desde el SVG; fuente en
+  `src/energia_monitor/formulario/estatico/favicon.svg`.
 
 ## 4. Reglas de maquetación
 

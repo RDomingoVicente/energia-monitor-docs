@@ -30,7 +30,6 @@ ICONOS = {
              '<path d="M12 17h.01"></path>',
     "grafana": '<path d="M3 3v18h18"></path><path d="m7 15 4-4 3 3 5-6"></path>',
     "salud": '<path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>',
-    "rayo": '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path>',
     "ok": '<path d="M20 6 9 17l-5-5"></path>',
     "info": '<circle cx="12" cy="12" r="9"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>',
     "alerta": '<path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17'
@@ -43,6 +42,19 @@ PANTALLAS = [("inicio", "/", "Inicio"), ("excepciones", "/excepciones", "Excepci
 NAV_MOVIL = [("inicio", "/", "Inicio"), ("excepciones", "/excepciones", "Excepciones"),
              ("horario", "/horario", "Horario"), ("historial", "/historial", "Historial"),
              ("parametros", "/parametros", "Ajustes")]
+
+
+# Logo BYD de Arcticons (CC BY-SA 4.0), el mismo dibujo que estatico/favicon.svg. viewBox recortado al trazo.
+LOGO_TRAZO = (
+    "M29.733 20.111V23c0 .554-.446 1-1 1H24v3.889m-1.5-3.89h-3.233c-.554 0-1-.445-1-1v-2.888m13.766 7.778l7.58-.006"
+    "a3.886 3.886 0 0 0 0-7.772h-7.58m-27.533 0h9.522a1.945 1.945 0 0 1 0 3.889a1.945 1.945 0 0 1 0 3.889H4.5"
+    "M14.022 24H4.5")
+
+
+def logo(clase: str) -> Html:
+    return h('<svg class="logo {}" aria-hidden="true" viewBox="3 19 42 10" fill="none" stroke="currentColor" '
+             'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="{}"></path></svg>',
+             clase, LOGO_TRAZO)
 
 
 def icono(nombre: str, tam: int = 18, color: str = "currentColor") -> Html:
@@ -79,7 +91,7 @@ def pagina(marco: Marco, activa: str, ruta: str, contenido: Html, titulo: str) -
     lateral = h(
         '<nav class="side" aria-label="Secciones"><div class="marca">{}<div><p class="m nombre">energia-monitor</p>'
         '<p class="m version">formulario · v{}</p></div></div>{}<div class="hueco"></div>{}</nav>',
-        icono("rayo", 22, "#2F81F7"), marco.version, unir(enlaces), unir(pie))
+        logo("logo-lateral"), marco.version, unir(enlaces), unir(pie))
 
     chips = []
     if cab is not None:
@@ -104,16 +116,19 @@ def pagina(marco: Marco, activa: str, ruta: str, contenido: Html, titulo: str) -
     n_avisos = len(cab.avisos) if cab else 0
     contador_movil = _contador(cab, movil=True)
     cabecera_movil = h(
-        '<header class="cabecera-movil"><p class="m ruta">formulario / <span>{}</span></p>'
+        # En móvil el logo ocupa el lugar de «formulario»: con los dos, la ruta no cabe en 390 px.
+        '<header class="cabecera-movil"><p class="m ruta">{}/ <span>{}</span></p>'
         '<div class="acciones">{}<a href="/avisos" class="icono" aria-label="Avisos: {} activos">{}{}</a>'
         '<a href="/ayuda" class="icono" aria-label="Ayuda">{}</a></div></header>',
-        ruta, recalculo, n_avisos, icono("avisos", 20), contador_movil, icono("ayuda", 20))
+        logo("logo-movil"), ruta, recalculo, n_avisos, icono("avisos", 20), contador_movil, icono("ayuda", 20))
     nav = unir(h('<a href="{}"' + (' class="on" aria-current="page"' if clave == activa else "") + '>{}{}</a>',
                  href, icono(clave, 20), texto) for clave, href, texto in NAV_MOVIL)
     return h(
         '<!doctype html><html lang="es"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<title>{} · batería</title><link rel="stylesheet" href="/estatico/estilo.css?v={}"></head>'
+        '<title>{} · batería</title><link rel="stylesheet" href="/estatico/estilo.css?v={}">'
+        '<link rel="icon" href="/favicon.ico" sizes="48x48"><link rel="icon" href="/favicon.svg" type="image/svg+xml">'
+        '<link rel="apple-touch-icon" href="/apple-touch-icon.png"></head>'
         '<body><div class="app">{}<div class="cuerpo">{}{}<main>{}</main>'
         '<nav class="nav" aria-label="Secciones">{}</nav></div></div></body></html>',
         titulo, marco.version, lateral, cabecera, cabecera_movil, contenido, nav)

@@ -174,9 +174,10 @@ def pantalla(d: AyudaDatos, q: str = "") -> Html:
         resultado = (h('<p class="k">Resultados para «{}» · <a href="/ayuda">ver toda la ayuda</a></p>', q.strip())
                      if bloques else h('<p class="vacio">Nada en la ayuda contiene «{}». <a href="/ayuda">Ver toda la '
                                        'ayuda</a></p>', q.strip()))
-    busqueda = h('<form class="buscar" action="/ayuda" method="get"><label for="ayuda-q" class="k">Buscar en la ayuda'
-                 '</label><input id="ayuda-q" name="q" class="inp" type="search" placeholder="p. ej. P75" value="{}">'
-                 '</form>', q.strip())
+    # El buscador va dos veces (índice de escritorio y cabecera en móvil): un id distinto en cada una.
+    busqueda = [h('<form class="buscar" action="/ayuda" method="get"><label for="{}" class="k">Buscar en la ayuda'
+                  '</label><input id="{}" name="q" class="inp" type="search" placeholder="p. ej. P75" value="{}">'
+                  '</form>', i, i, q.strip()) for i in ("ayuda-q", "ayuda-q-movil")]
     extra = {"parametros": Html('<a href="/parametros" class="k">Ir a Parámetros →</a>')}
     paneles = unir(h('<section id="{}" class="pn"><div class="ph"><h2 class="pt">{}</h2>{}</div>{}</section>', i, t,
                      extra.get(i, Html("")), c) for i, t, c, _ in bloques)
@@ -185,6 +186,8 @@ def pantalla(d: AyudaDatos, q: str = "") -> Html:
     return h('<div class="ayuda"><nav class="indice solo-escritorio" aria-label="En esta página"><p class="pt">En esta '
              'página</p>{}{}</nav><div class="col"><header class="cabecera-ayuda"><h1>Ayuda</h1><p class="sub">Qué '
              'calcula el formulario, qué significa cada pantalla y cómo afecta cada parámetro. Los valores mostrados son '
-             'los vigentes.</p></header><div class="solo-movil">{}</div>{}<div class="solo-escritorio paneles">{}</div>'
-             '<div class="solo-movil detalles">{}</div></div></div>',
-             indice, busqueda, busqueda, resultado, paneles, detalles)
+             'los vigentes.</p></header><div class="solo-movil">{}</div>{}'
+             # Visibilidad en un contenedor propio: .paneles/.detalles (display: flex) anulaban .solo-*.
+             '<div class="solo-escritorio"><div class="paneles">{}</div></div>'
+             '<div class="solo-movil"><div class="detalles">{}</div></div></div></div>',
+             indice, busqueda[0], busqueda[1], resultado, paneles, detalles)
