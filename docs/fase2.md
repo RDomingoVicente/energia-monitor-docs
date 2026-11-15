@@ -201,7 +201,11 @@ Entrega:
    frente a la referencia en Python y la secuencia real del 13 al 14/11).
    Pendiente de verificar en el NAS: una lectura real, una desconexión y
    reconexión reales y su reconciliación con la lectura siguiente.
-3. Formulario (E2.9): pendiente de las maquetas.
+   2b. Excepciones con salida o sin salida (v0.5.1, migración 0015): cambio
+   de E2.7 del 15/11/2026 (formulario-maquetas.md, sección 8, punto 2).
+   Verificado con tests, también la conversión de las excepciones de 0014.
+3. Formulario (E2.9): maquetas en formulario-maquetas.md; migración 0016
+   (rol `formulario_rw`), v0.5.2.
 4. Dashboard de batería (E2.10, segunda parte): pendiente.
 
 ### Objetivo
@@ -298,7 +302,8 @@ verificar con el coche**: la regla se desactiva con `detectar_carga_completa`.
   los `ventana_consumo_dias` (28) anteriores a su salida, excluidos los de
   viaje largo y los cortos. Sin historia, `consumo_inicial_trayecto_kwh`
   (inicial 25, origen usuario).
-- Si el día de salida tiene una excepción de viaje largo, sus trayectos usan
+- Si el día de salida tiene una excepción con consumo indicado (viaje
+  largo, E2.7), sus trayectos usan
   el consumo declarado, repartido entre los trayectos no cortos de ese día en
   proporción a su duración.
 - Mientras el coche está fuera, la página muestra el nivel a la salida y
@@ -341,10 +346,25 @@ muestras y los dos extremos del intervalo.
 
 | Tipo | Campos |
 |------|--------|
-| Sin coche | Fecha |
-| Salida a otra hora | Fecha y hora |
-| Nivel objetivo | Fecha, hora y porcentaje |
-| Viaje largo | Fecha, hora de salida y consumo (en % de `capacidad_util_kwh` o en km) |
+| Con salida (`con_salida`) | Fecha, `hora_salida`, `consumo_modo` y `pct_objetivo` opcional (nivel mínimo a la salida, en %) |
+| Sin salida (`sin_salida`) | Fecha |
+
+- `consumo_modo` (solo con salida):
+  - `normal`: consumo previsto = P75 vigente; se calcula, no se guarda.
+  - `indicado`: exactamente uno de `km` o `pct` (en % de
+    `capacidad_util_kwh`). Los trayectos de ese día se tratan como viaje
+    largo: usan el consumo declarado y quedan fuera de la mediana (E2.4) y
+    del P75.
+- Sin salida solo se admite si el horario tiene salida ese día de la
+  semana. Lo comprueba la capa de servicio
+  (`bateria_servicio.registrar_excepcion`, que usará el formulario con un
+  422), no la base de datos: un INSERT por SQL se lo salta.
+- «Modificar» = baja de la anterior y alta de la nueva en la misma
+  transacción (`bateria_servicio.modificar_excepcion`).
+- Cambio del 15/11/2026 (migración 0015). Antes había cuatro tipos; las
+  filas existentes se convirtieron así: sin_coche → sin_salida; otra_hora →
+  con_salida normal; nivel_objetivo → con_salida normal con su
+  `pct_objetivo`; viaje_largo → con_salida indicado con sus km o pct.
 
 - El consumo en km se convierte con `consumo_kwh_100km` (inicial 23, origen
   usuario).
@@ -354,10 +374,10 @@ muestras y los dos extremos del intervalo.
   al menos un trayecto no corto, todos sus trayectos con consumo real y
   ninguno de viaje largo; su consumo es la suma de sus trayectos. Sin
   historia, el consumo inicial.
-- Energía necesaria para la próxima salida = max(0, reserva + consumo para
-  planificar − nivel estimado); con viaje largo, el consumo declarado en lugar
-  del percentil; con nivel objetivo, lo que falte para ese nivel. Nunca más
-  de lo que falte hasta el tope. Reserva: `reserva_pct` (25). Tope:
+- Objetivo de salida = min(tope, max(reserva + consumo previsto,
+  `pct_objetivo`)); consumo previsto: el percentil o, con consumo indicado,
+  el declarado. Energía necesaria para la próxima salida = max(0, objetivo −
+  nivel estimado). Reserva: `reserva_pct` (25). Tope:
   `tope_pct` (100). Con el coche fuera, el nivel estimado es el de la salida
   menos el consumo estimado del trayecto en curso.
 - Vistas para la página, Grafana y la etapa 3: estado de la batería y

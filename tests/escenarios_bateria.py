@@ -148,7 +148,7 @@ def varios_trayectos() -> tuple[Entradas, datetime]:
     c = (Constructor().estado(t(-10), 4).lectura(t(6), 90)
          .trayecto(t(8), t(10))
          .trayecto(t(32), t(40))
-         .excepcion(Excepcion("viaje_largo", date(2026, 11, 17), time(9, 0), consumo_pct=D(20)))
+         .excepcion(Excepcion("con_salida", date(2026, 11, 17), time(9, 0), "indicado", pct=D(20)))
          .lectura(t(41), "46.2"))
     return c.e, t(42)
 
@@ -252,9 +252,51 @@ def estimacion_por_mediana() -> tuple[Entradas, datetime]:
 def prevision() -> tuple[Entradas, datetime]:
     c = (Constructor().estado(t(-10), 4).lectura(t(1), 50)
          .horario(lun=time(9, 0), mar=time(9, 0), mie=time(9, 0), jue=time(9, 0), vie=time(7, 0))
-         .excepcion(Excepcion("sin_coche", date(2026, 11, 16)))
-         .excepcion(Excepcion("otra_hora", date(2026, 11, 17), time(6, 30))))
+         .excepcion(Excepcion("sin_salida", date(2026, 11, 16)))
+         .excepcion(Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "normal")))
     return c.e, t(2)
+
+
+# Excepción del martes 17 a las 6:30 en el escenario de previsión (nivel 50 %, sin historia:
+# consumo previsto 25 kWh). Cada una se compara también contra SQL.
+EXCEPCIONES_MARTES: dict[str, Excepcion] = {
+    "normal": Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "normal"),
+    "normal_objetivo_alto": Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "normal", pct_objetivo=D(80)),
+    "normal_objetivo_bajo": Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "normal", pct_objetivo=D(30)),
+    "km": Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "indicado", km=D(200)),
+    "pct": Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "indicado", pct=D(40)),
+    "km_tope": Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "indicado", km=D(500)),
+    "pct_objetivo": Excepcion("con_salida", date(2026, 11, 17), time(6, 30), "indicado", pct=D(10),
+                              pct_objetivo=D(90)),
+    "sin_salida": Excepcion("sin_salida", date(2026, 11, 17)),
+}
+
+
+def _prevision_con(x: Excepcion) -> Escenario:
+    def f() -> tuple[Entradas, datetime]:
+        c = (Constructor().estado(t(-10), 4).lectura(t(1), 50)
+             .horario(lun=time(9, 0), mar=time(9, 0), mie=time(9, 0), jue=time(9, 0), vie=time(7, 0))
+             .excepcion(Excepcion("sin_salida", date(2026, 11, 16)))
+             .excepcion(x))
+        return c.e, t(2)
+    return f
+
+
+for _nombre, _x in EXCEPCIONES_MARTES.items():
+    _f = _prevision_con(_x)
+    _f.__name__ = f"excepcion_{_nombre}"
+    escenario(_f)
+
+
+@escenario
+def excepcion_normal_cuenta_para_el_p75() -> tuple[Entradas, datetime]:
+    # Día 16 con con_salida normal (cuenta para mediana y P75); día 17 con consumo indicado (no cuenta).
+    c = (Constructor().estado(t(-10), 4).lectura(t(6), 90)
+         .excepcion(Excepcion("con_salida", date(2026, 11, 16), time(9, 0), "normal"))
+         .excepcion(Excepcion("con_salida", date(2026, 11, 17), time(9, 0), "indicado", km=D(100)))
+         .trayecto(t(8), t(10)).lectura(t(11), 70)
+         .trayecto(t(32), t(40)).lectura(t(41), 40))
+    return c.e, t(42)
 
 
 @escenario
@@ -298,9 +340,9 @@ def aleatorio(semilla: int) -> tuple[Entradas, datetime]:
     if rnd.random() < 0.3:
         dia = (T0 + timedelta(days=rnd.randrange(0, 4))).date()
         if rnd.random() < 0.5:
-            c.excepcion(Excepcion("viaje_largo", dia, time(8, 0), consumo_km=D(rnd.randrange(50, 400))))
+            c.excepcion(Excepcion("con_salida", dia, time(8, 0), "indicado", km=D(rnd.randrange(50, 400))))
         else:
-            c.excepcion(Excepcion("viaje_largo", dia, time(8, 0), consumo_pct=D(rnd.randrange(10, 80))))
+            c.excepcion(Excepcion("con_salida", dia, time(8, 0), "indicado", pct=D(rnd.randrange(10, 80))))
     # Instantes de lectura únicos (índice único parcial).
     vistos: set[datetime] = set()
     unicas = []

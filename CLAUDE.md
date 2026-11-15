@@ -29,8 +29,10 @@ Antes de cualquier cambio, leer:
   hecho (v0.5.0): migración 0014 (nivel de batería, trayectos,
   reconciliación y previsión, en `recalcular_bateria()`), CLI `bateria` y
   recálculo desde el muestreo; referencia en Python en
-  `src/energia_monitor/bateria.py`. La etapa 3 no se empieza hasta nuevo
-  aviso.
+  `src/energia_monitor/bateria.py`. Paso 2b hecho (v0.5.1): migración 0015,
+  excepciones `con_salida`/`sin_salida` (validación en
+  `bateria_servicio.registrar_excepcion`). El formulario (paso 3) va con la
+  0016 y v0.5.2. La etapa 3 no se empieza hasta nuevo aviso.
 
 ## Estructura
 
@@ -60,7 +62,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0015).
+  migración nueva (la siguiente es la 0016).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de

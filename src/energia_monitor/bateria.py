@@ -125,12 +125,20 @@ class CambioEstado:
 
 @dataclass(frozen=True)
 class Excepcion:
+    """bateria_excepcion (0015): con_salida (hora_salida, consumo_modo normal o indicado con km o pct,
+    pct_objetivo opcional) o sin_salida (solo la fecha)."""
+
     tipo: str
     fecha: date
-    hora: time | None = None
+    hora_salida: time | None = None
+    consumo_modo: str | None = None
+    km: Decimal | None = None
+    pct: Decimal | None = None
     pct_objetivo: Decimal | None = None
-    consumo_pct: Decimal | None = None
-    consumo_km: Decimal | None = None
+
+    @property
+    def indicado(self) -> bool:
+        return self.tipo == "con_salida" and self.consumo_modo == "indicado"
 
 
 @dataclass
@@ -299,7 +307,7 @@ def detectar_trayectos(e: Entradas, ahora: datetime) -> list[Trayecto]:
     for c in sorted(e.estados, key=lambda c: c.detectado_en):
         if c.detectado_en <= ahora and (c.estado in CONECTADO or c.estado in LIBRE):
             por_conector[c.conector].append(c)
-    dias_largos = {x.fecha for x in e.excepciones if x.tipo == "viaje_largo"}
+    dias_largos = {x.fecha for x in e.excepciones if x.indicado}
     trayectos = []
     for conector, cambios in por_conector.items():
         transiciones: list[tuple[datetime, str]] = []
@@ -380,12 +388,8 @@ def estimar_trayecto(e: Entradas, t: Trayecto, trayectos: list[Trayecto], ahora:
         est, origen = CERO, "cero"
     elif t.viaje_largo:
         dia = dia_local(t.salida)
-        x = next(x for x in e.excepciones if x.tipo == "viaje_largo" and x.fecha == dia)
-        if x.consumo_pct is not None:
-            declarado = x.consumo_pct / CIEN * p.valor("capacidad_util_kwh", t.salida)
-        else:
-            assert x.consumo_km is not None
-            declarado = x.consumo_km * p.valor("consumo_kwh_100km", t.salida) / CIEN
+        x = next(x for x in e.excepciones if x.indicado and x.fecha == dia)
+        declarado = consumo_declarado(p, x, t.salida)
         del_dia = [o for o in trayectos if o.conector == t.conector and o.viaje_largo and dia_local(o.salida) == dia]
         total = sum((_segundos(o.salida, o.llegada or ahora) for o in del_dia), CERO)
         dur = _segundos(t.salida, t.llegada or ahora)
@@ -542,9 +546,18 @@ def local_a_utc(dia: date, hora: time) -> datetime:
 class Salida:
     fecha: date
     salida: datetime
-    tipo: str
+    tipo: str  # horario o con_salida
+    consumo_modo: str  # normal o indicado
     pct_objetivo: Decimal | None
     consumo_declarado_kwh: Decimal | None
+
+
+def consumo_declarado(p: Parametros, x: Excepcion, instante: datetime) -> Decimal:
+    """Consumo indicado: pct de capacidad_util_kwh o km por consumo_kwh_100km."""
+    if x.pct is not None:
+        return x.pct / CIEN * p.valor("capacidad_util_kwh", instante)
+    assert x.km is not None
+    return x.km * p.valor("consumo_kwh_100km", instante) / CIEN
 
 
 def salidas(e: Entradas, desde: datetime, dias: int) -> list[Salida]:
@@ -556,23 +569,20 @@ def salidas(e: Entradas, desde: datetime, dias: int) -> list[Salida]:
     for i in range(dias + 1):
         d = hoy + timedelta(days=i)
         x = excepciones.get(d)
-        if x is not None and x.tipo == "sin_coche":
+        if x is not None and x.tipo == "sin_salida":
             continue
-        hora = x.hora if x is not None else e.horario.get(d.isoweekday())
+        hora = x.hora_salida if x is not None else e.horario.get(d.isoweekday())
         if hora is None:
             continue
         instante = local_a_utc(d, hora)
         if instante <= desde:
             continue
-        tipo = x.tipo if x is not None else "horario"
-        declarado = None
-        if x is not None and tipo == "viaje_largo":
-            if x.consumo_pct is not None:
-                declarado = x.consumo_pct / CIEN * p.valor("capacidad_util_kwh", instante)
-            else:
-                assert x.consumo_km is not None
-                declarado = x.consumo_km * p.valor("consumo_kwh_100km", instante) / CIEN
-        resultado.append(Salida(d, instante, tipo, x.pct_objetivo if x is not None else None, declarado))
+        if x is None:
+            resultado.append(Salida(d, instante, "horario", "normal", None, None))
+            continue
+        assert x.consumo_modo is not None
+        declarado = consumo_declarado(p, x, instante) if x.indicado else None
+        resultado.append(Salida(d, instante, x.tipo, x.consumo_modo, x.pct_objetivo, declarado))
     return sorted(resultado, key=lambda s: s.salida)
 
 
@@ -674,16 +684,15 @@ def estado(e: Entradas, r: Resultado, ahora: datetime) -> Estado:
     proximas = salidas(e, ahora, 7)
     prox = proximas[0] if proximas else None
     plan, _, _ = consumo_plan(e, r.trayectos, ahora)
-    consumo = prox.consumo_declarado_kwh if prox is not None and prox.tipo == "viaje_largo" else plan
+    consumo = prox.consumo_declarado_kwh if prox is not None and prox.consumo_modo == "indicado" else plan
     necesaria = None
     if prox is not None and nivel_plan is not None:
         reserva = p.valor("reserva_pct", ahora) / CIEN * cap
         tope = p.valor("tope_pct", ahora) / CIEN * cap
-        if prox.tipo == "nivel_objetivo":
-            assert prox.pct_objetivo is not None
-            objetivo = prox.pct_objetivo / CIEN * cap
-        else:
-            assert consumo is not None
-            objetivo = reserva + consumo
+        # Objetivo de salida = min(tope, max(reserva + consumo previsto, pct_objetivo)), en kWh.
+        assert consumo is not None
+        objetivo = reserva + consumo
+        if prox.pct_objetivo is not None:
+            objetivo = max(objetivo, prox.pct_objetivo / CIEN * cap)
         necesaria = min(max(objetivo - nivel_plan, CERO), max(tope - nivel_plan, CERO))
     return Estado(nivel, pendiente, coche, en_curso, nivel_plan, prox.salida if prox else None, consumo, necesaria)

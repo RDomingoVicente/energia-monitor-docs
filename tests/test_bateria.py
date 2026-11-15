@@ -13,7 +13,7 @@ import pytest
 from escenarios_bateria import ESCENARIOS, MIN, T0, aleatorio, con_intervalos, t
 
 from energia_monitor import bateria
-from energia_monitor.bateria import Excepcion, Parametro, Parametros, percentil_cont
+from energia_monitor.bateria import Parametro, Parametros, percentil_cont
 
 CAP = D("91.3")
 
@@ -273,9 +273,9 @@ def test_consumo_para_planificar_por_dia_de_uso() -> None:
 def test_salidas_con_horario_y_excepciones() -> None:
     e, ahora = ESCENARIOS["prevision"]()
     s = bateria.salidas(e, ahora, 7)
-    # Lunes 16 sin coche; martes 17 a las 6:30; miércoles y jueves a las 9; viernes a las 7; lunes 23 a las 9.
+    # Lunes 16 sin salida; martes 17 a las 6:30; miércoles y jueves a las 9; viernes a las 7; lunes 23 a las 9.
     assert [(x.fecha.day, x.salida.astimezone(bateria.MADRID).time(), x.tipo) for x in s] == [
-        (17, time(6, 30), "otra_hora"), (18, time(9), "horario"), (19, time(9), "horario"),
+        (17, time(6, 30), "con_salida"), (18, time(9), "horario"), (19, time(9), "horario"),
         (20, time(7), "horario"), (23, time(9), "horario")]
 
 
@@ -286,15 +286,46 @@ def test_energia_necesaria_reserva_mas_consumo() -> None:
     assert cerca(est.energia_necesaria_kwh, kwh(25) + 25 - kwh(50))
 
 
-def test_energia_necesaria_nivel_objetivo_y_tope() -> None:
-    e, ahora = ESCENARIOS["prevision"]()
-    lunes = Excepcion("sin_coche", date(2026, 11, 16))
-    e.excepciones = [lunes, Excepcion("nivel_objetivo", date(2026, 11, 17), time(6, 30), pct_objetivo=D(80))]
-    r = bateria.recalcular(e, ahora)
-    assert cerca(bateria.estado(e, r, ahora).energia_necesaria_kwh, kwh(80) - kwh(50))
-    e.excepciones = [lunes, Excepcion("viaje_largo", date(2026, 11, 17), time(6, 30), consumo_km=D(500))]
-    # 25 % + 115 kWh supera el tope: lo que falta hasta el 100 %.
-    assert cerca(bateria.estado(e, r, ahora).energia_necesaria_kwh, CAP - kwh(50))
+# Objetivo de salida = min(tope, max(reserva + consumo previsto, pct_objetivo)); nivel 50 %, reserva 25 %.
+@pytest.mark.parametrize(("nombre", "salida", "consumo", "objetivo"), [
+    ("normal", time(6, 30), D(25), kwh(25) + 25),
+    ("normal_objetivo_alto", time(6, 30), D(25), kwh(80)),                  # gana pct_objetivo
+    ("normal_objetivo_bajo", time(6, 30), D(25), kwh(25) + 25),             # gana reserva + consumo
+    ("km", time(6, 30), D(200) * D(23) / 100, kwh(25) + D(46)),             # 200 km × 23 kWh/100 km
+    ("pct", time(6, 30), kwh(40), kwh(65)),                                 # 40 % de capacidad_util_kwh
+    ("km_tope", time(6, 30), D(115), CAP),                                  # 25 % + 115 kWh pasa del tope
+    ("pct_objetivo", time(6, 30), kwh(10), kwh(90)),                        # indicado y pct_objetivo
+    ("sin_salida", time(9), D(25), kwh(25) + 25),                           # salta al miércoles a las 9
+])
+def test_energia_necesaria_por_combinacion(nombre: str, salida: time, consumo: D, objetivo: D) -> None:
+    e, ahora, r = calcular(f"excepcion_{nombre}")
+    est = bateria.estado(e, r, ahora)
+    assert est.proxima_salida is not None
+    assert est.proxima_salida.astimezone(bateria.MADRID).time() == salida
+    assert cerca(est.consumo_plan_kwh, consumo)
+    assert cerca(est.energia_necesaria_kwh, objetivo - kwh(50))
+
+
+def test_salidas_por_combinacion() -> None:
+    def primera(nombre: str) -> tuple:
+        e, ahora = ESCENARIOS[f"excepcion_{nombre}"]()
+        s = bateria.salidas(e, ahora, 7)[0]
+        return (s.fecha.day, s.tipo, s.consumo_modo, s.pct_objetivo, s.consumo_declarado_kwh)
+    assert primera("normal") == (17, "con_salida", "normal", None, None)
+    assert primera("km") == (17, "con_salida", "indicado", None, D(46))
+    assert primera("pct") == (17, "con_salida", "indicado", None, kwh(40))
+    assert primera("pct_objetivo") == (17, "con_salida", "indicado", D(90), kwh(10))
+    assert primera("sin_salida") == (18, "horario", "normal", None, None)
+
+
+def test_consumo_indicado_es_viaje_largo_y_normal_no() -> None:
+    e, ahora, r = calcular("excepcion_normal_cuenta_para_el_p75")
+    assert [(t.salida.day, t.viaje_largo, t.origen_consumo) for t in r.trayectos] == [
+        (16, False, "reconciliado"), (17, True, "reconciliado")]
+    dias = bateria.consumo_por_dia(r.trayectos)
+    assert [(d.fecha.day, d.cuenta) for d in dias] == [(16, True), (17, False)]
+    # El trayecto del 17 se estima con lo declarado (100 km × 23 kWh/100 km), no con la mediana.
+    assert r.trayectos[1].consumo_estimado_kwh == D(23)
 
 
 def test_coche_fuera_resta_el_trayecto_en_curso() -> None:

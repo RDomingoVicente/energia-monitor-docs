@@ -28,6 +28,7 @@ PUBLICADAS = {
     "0012_precio_final_materializado.sql": "dfd9feb9f3b93f36c9c9fecd1e2a242b86a66305a1d8e03d64498fcdd4ca1ab6",
     "0013_energia_tramo.sql": "8b3be0b2eff22a5161ffe7660b2c09123d3e61b142279d1640ce525f61d7759c",
     "0014_bateria.sql": "64ea3b208719ce6e82ca4a4d08b6a129462ab76ffd1b5bb47c9acc6970cfea97",
+    "0015_excepcion_salida.sql": "5e7f953ff5a88afabcc2f3645d50e5e88b63d57ad7c79a139f402046ba532122",
 }
 
 

@@ -8,8 +8,10 @@ historias aleatorias. Nunca se contacta con el cargador.
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime, time, timedelta
+import uuid
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal as D
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -20,6 +22,7 @@ from muestras_log import ClienteLog, entradas, leer
 from energia_monitor import bateria, bateria_servicio, db, parametros
 from energia_monitor.muestreo import Muestreador
 
+MIGRACIONES = Path(__file__).resolve().parents[2] / "db" / "migrations"
 TABLAS_USUARIO = ("bateria_lectura", "bateria_excepcion", "bateria_horario")
 TABLAS_CARGADOR = ("cargador_muestra", "cargador_estado", "cargador_sesion", "energia_tramo")
 
@@ -72,9 +75,9 @@ def cargar(conn: psycopg.Connection, e: bateria.Entradas) -> None:
             [(c.conector, c.detectado_en, c.estado) for c in e.estados],
         )
         cur.executemany(
-            "INSERT INTO bateria_excepcion (tipo, fecha, hora, pct_objetivo, consumo_pct, consumo_km)"
-            " VALUES (%s, %s, %s, %s, %s, %s)",
-            [(x.tipo, x.fecha, x.hora, x.pct_objetivo, x.consumo_pct, x.consumo_km) for x in e.excepciones],
+            "INSERT INTO bateria_excepcion (tipo, fecha, hora_salida, consumo_modo, km, pct, pct_objetivo)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            [(x.tipo, x.fecha, x.hora_salida, x.consumo_modo, x.km, x.pct, x.pct_objetivo) for x in e.excepciones],
         )
         cur.executemany(
             "INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES (%s, %s)",
@@ -131,9 +134,9 @@ def verificar(conn: psycopg.Connection, e: bateria.Entradas, ahora: datetime) ->
               i.factor_observado) for i in r.intervalos], "intervalos")
 
     # Previsión y estado.
-    iguales(conn.execute("SELECT fecha, salida, tipo, pct_objetivo, consumo_declarado_kwh"
+    iguales(conn.execute("SELECT fecha, salida, tipo, consumo_modo, pct_objetivo, consumo_declarado_kwh"
                          " FROM bateria_salidas(%s, 7)", (ahora,)).fetchall(),
-            [(s.fecha, s.salida, s.tipo, s.pct_objetivo, s.consumo_declarado_kwh)
+            [(s.fecha, s.salida, s.tipo, s.consumo_modo, s.pct_objetivo, s.consumo_declarado_kwh)
              for s in bateria.salidas(e, ahora, 7)], "salidas")
     iguales(conn.execute("SELECT * FROM bateria_consumo_plan(%s)", (ahora,)).fetchall(),
             [bateria.consumo_plan(e, r.trayectos, ahora)], "consumo para planificar")
@@ -174,6 +177,10 @@ def entradas_desde_bd(conn: psycopg.Connection) -> bateria.Entradas:
         "SELECT instante, intervalo_s, evse_w, estado FROM cargador_muestra ORDER BY instante")]
     e.estados = [bateria.CambioEstado(*f) for f in conn.execute(
         "SELECT conector, detectado_en, estado FROM cargador_estado ORDER BY detectado_en")]
+    e.excepciones = [bateria.Excepcion(*f) for f in conn.execute(
+        "SELECT tipo, fecha, hora_salida, consumo_modo, km, pct, pct_objetivo FROM bateria_excepcion"
+        " WHERE anulada_en IS NULL ORDER BY fecha")]
+    e.horario = dict(conn.execute("SELECT dia_iso, hora_salida FROM bateria_horario").fetchall())
     return e
 
 
@@ -390,24 +397,45 @@ def test_parametro_de_bateria_no_valido(conn: psycopg.Connection, limpio: None, 
 
 
 def test_una_excepcion_activa_por_fecha(conn: psycopg.Connection, limpio: None) -> None:
-    conn.execute("INSERT INTO bateria_excepcion (tipo, fecha) VALUES ('sin_coche', '2026-11-20')")
+    conn.execute("INSERT INTO bateria_excepcion (tipo, fecha) VALUES ('sin_salida', '2026-11-20')")
     with pytest.raises(psycopg.errors.UniqueViolation):
-        conn.execute("INSERT INTO bateria_excepcion (tipo, fecha, hora) VALUES ('otra_hora', '2026-11-20', '07:00')")
+        conn.execute("INSERT INTO bateria_excepcion (tipo, fecha, hora_salida, consumo_modo)"
+                     " VALUES ('con_salida', '2026-11-20', '07:00', 'normal')")
     conn.execute("UPDATE bateria_excepcion SET anulada_en = now() WHERE fecha = '2026-11-20'")
-    conn.execute("INSERT INTO bateria_excepcion (tipo, fecha, hora) VALUES ('otra_hora', '2026-11-20', '07:00')")
+    conn.execute("INSERT INTO bateria_excepcion (tipo, fecha, hora_salida, consumo_modo)"
+                 " VALUES ('con_salida', '2026-11-20', '07:00', 'normal')")
 
 
 @pytest.mark.parametrize("valores", [
-    "('sin_coche', '2026-11-20', '07:00', NULL, NULL, NULL)",
-    "('otra_hora', '2026-11-20', NULL, NULL, NULL, NULL)",
-    "('nivel_objetivo', '2026-11-20', '07:00', NULL, NULL, NULL)",
-    "('viaje_largo', '2026-11-20', '07:00', NULL, NULL, NULL)",
-    "('viaje_largo', '2026-11-20', '07:00', NULL, 30, 200)",
+    "('con_salida', '07:00', 'normal', NULL, NULL, NULL)",
+    "('con_salida', '07:00', 'indicado', 200, NULL, 80)",
+    "('con_salida', '07:00', 'indicado', NULL, 30, NULL)",
+    "('sin_salida', NULL, NULL, NULL, NULL, NULL)",
+])
+def test_combinaciones_validas_de_excepcion(conn: psycopg.Connection, limpio: None, valores: str) -> None:
+    conn.execute("INSERT INTO bateria_excepcion (tipo, hora_salida, consumo_modo, km, pct, pct_objetivo, fecha)"
+                 f" VALUES {valores[:-1]}, '2026-11-20')")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("valores", [
+    "('sin_coche', NULL, NULL, NULL, NULL, NULL)",                 # tipos de 0014
+    "('viaje_largo', '07:00', 'indicado', 200, NULL, NULL)",
+    "('con_salida', NULL, 'normal', NULL, NULL, NULL)",            # sin hora
+    "('con_salida', '07:00', NULL, NULL, NULL, NULL)",             # sin modo
+    "('con_salida', '07:00', 'otro', NULL, NULL, NULL)",
+    "('con_salida', '07:00', 'normal', 200, NULL, NULL)",          # normal con km
+    "('con_salida', '07:00', 'normal', NULL, 30, NULL)",           # normal con pct
+    "('con_salida', '07:00', 'indicado', NULL, NULL, NULL)",       # indicado sin km ni pct
+    "('con_salida', '07:00', 'indicado', 200, 30, NULL)",          # km y pct a la vez
+    "('con_salida', '07:00', 'normal', NULL, NULL, 0)",            # pct_objetivo fuera de rango
+    "('sin_salida', '07:00', NULL, NULL, NULL, NULL)",             # sin_salida con hora
+    "('sin_salida', NULL, 'normal', NULL, NULL, NULL)",
+    "('sin_salida', NULL, NULL, NULL, NULL, 80)",
 ])
 def test_campos_de_cada_tipo_de_excepcion(conn: psycopg.Connection, limpio: None, valores: str) -> None:
     with pytest.raises(psycopg.errors.CheckViolation):
-        conn.execute("INSERT INTO bateria_excepcion (tipo, fecha, hora, pct_objetivo, consumo_pct, consumo_km)"
-                     f" VALUES {valores}")  # type: ignore[arg-type]
+        conn.execute("INSERT INTO bateria_excepcion (tipo, hora_salida, consumo_modo, km, pct, pct_objetivo, fecha)"
+                     f" VALUES {valores[:-1]}, '2026-11-20')")  # type: ignore[arg-type]
 
 
 OBJETOS_BATERIA = ["bateria_parametro_clave", "bateria_parametro", "bateria_lectura", "bateria_horario",
@@ -438,3 +466,155 @@ def test_horario_por_sql(conn: psycopg.Connection, limpio: None) -> None:
     conn.execute("INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES (1, %s)", (time(9, 0),))
     with pytest.raises(psycopg.errors.CheckViolation):
         conn.execute("INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES (8, '09:00')")
+
+
+# --- Excepciones con_salida / sin_salida (0015) ----------------------------------------------------
+
+
+def test_conversion_de_las_excepciones_de_0014(tmp_path: Path) -> None:
+    """Base de datos aparte: migraciones hasta la 0014, excepciones con los tipos antiguos y la 0015."""
+    hasta_0014 = tmp_path / "migraciones"
+    hasta_0014.mkdir()
+    for f in sorted(MIGRACIONES.glob("*.sql")):
+        if f.name[:4] <= "0014":
+            (hasta_0014 / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    nombre = f"em_test_conv_{uuid.uuid4().hex[:8]}"
+    with psycopg.connect(autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{nombre}"')  # type: ignore[arg-type]
+    try:
+        with psycopg.connect(dbname=nombre, autocommit=True) as c:
+            assert db.migrar(c, hasta_0014)[-1].startswith("0014")
+            c.execute("INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES (1, '09:00'), (2, '09:00'),"
+                      " (3, '09:00')")
+            c.execute(
+                "INSERT INTO bateria_excepcion (tipo, fecha, hora, pct_objetivo, consumo_pct, consumo_km, nota,"
+                " anulada_en) VALUES"
+                " ('sin_coche',      '2026-11-16', NULL,    NULL, NULL, NULL, 'a', NULL),"
+                " ('otra_hora',      '2026-11-17', '06:30', NULL, NULL, NULL, 'b', NULL),"
+                " ('nivel_objetivo', '2026-11-18', '07:00', 80,   NULL, NULL, 'c', NULL),"
+                " ('viaje_largo',    '2026-11-19', '08:00', NULL, NULL, 350,  'd', NULL),"
+                " ('viaje_largo',    '2026-11-20', '08:00', NULL, 30,   NULL, 'e', NULL),"
+                " ('viaje_largo',    '2026-11-17', '05:00', NULL, 20,   NULL, 'f', now())")
+            antes = c.execute("SELECT id, fecha, nota, alta_en, anulada_en FROM bateria_excepcion"
+                              " ORDER BY id").fetchall()
+            assert db.migrar(c, MIGRACIONES) == [f.name for f in sorted(MIGRACIONES.glob("*.sql"))
+                                                 if f.name[:4] > "0014"]
+            assert c.execute("SELECT id, fecha, nota, alta_en, anulada_en FROM bateria_excepcion"
+                             " ORDER BY id").fetchall() == antes
+            assert c.execute("SELECT nota, tipo, hora_salida, consumo_modo, km, pct, pct_objetivo"
+                             " FROM bateria_excepcion ORDER BY id").fetchall() == [
+                ("a", "sin_salida", None, None, None, None, None),
+                ("b", "con_salida", time(6, 30), "normal", None, None, None),
+                ("c", "con_salida", time(7), "normal", None, None, D(80)),
+                ("d", "con_salida", time(8), "indicado", D(350), None, None),
+                ("e", "con_salida", time(8), "indicado", None, D(30), None),
+                ("f", "con_salida", time(5), "indicado", None, D(20), None),
+            ]
+            # Las salidas tras la conversión: lunes sin salida, martes 6:30, miércoles 7:00 con objetivo 80 %...
+            desde = datetime(2026, 11, 15, 23, 0, tzinfo=UTC)
+            assert c.execute("SELECT fecha, tipo, consumo_modo, pct_objetivo, round(consumo_declarado_kwh, 3)"
+                             " FROM bateria_salidas(%s, 4)", (desde,)).fetchall() == [
+                (date(2026, 11, 17), "con_salida", "normal", None, None),
+                (date(2026, 11, 18), "con_salida", "normal", D(80), None),
+                (date(2026, 11, 19), "con_salida", "indicado", None, D("80.500")),  # 350 km × 23/100
+                (date(2026, 11, 20), "con_salida", "indicado", None, D("27.390")),  # 30 % de 91,3
+            ]
+    finally:
+        with psycopg.connect(autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{nombre}" WITH (FORCE)')  # type: ignore[arg-type]
+
+
+def _horario(conn: psycopg.Connection) -> None:
+    # Lunes a viernes a las 9; sábado y domingo sin salida.
+    conn.execute("INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES (1, '09:00'), (2, '09:00'), (3, '09:00'),"
+                 " (4, '09:00'), (5, '09:00'), (6, NULL)")
+
+
+AHORA = datetime(2026, 11, 16, 2, 0, tzinfo=UTC)
+NX = bateria_servicio.NuevaExcepcion
+
+
+@pytest.mark.parametrize("x", [
+    NX("con_salida", date(2026, 11, 16), time(6, 30), "normal"),
+    NX("con_salida", date(2026, 11, 16), time(6, 30), "indicado", km=D(200)),
+    NX("con_salida", date(2026, 11, 16), time(6, 30), "indicado", pct=D(40), pct_objetivo=D(90)),
+    NX("sin_salida", date(2026, 11, 16)),
+], ids=["con_salida_normal", "con_salida_km", "con_salida_pct", "sin_salida"])
+def test_registrar_excepcion(conn: psycopg.Connection, limpio: None, x: bateria_servicio.NuevaExcepcion) -> None:
+    # Lunes 16 a las 3:00 en Madrid; el horario sale a las 9.
+    _horario(conn)
+    bateria_servicio.registrar_lectura(conn, instante=AHORA - timedelta(hours=1), pct=D(50), origen="cli", ahora=AHORA)
+    id_ = bateria_servicio.registrar_excepcion(conn, x, AHORA)
+    assert conn.execute("SELECT tipo, fecha, hora_salida, consumo_modo, km, pct, pct_objetivo FROM bateria_excepcion"
+                        " WHERE id = %s", (id_,)).fetchone() == (
+        x.tipo, x.fecha, x.hora_salida, x.consumo_modo, x.km, x.pct, x.pct_objetivo)
+    # El estado ya la tiene en cuenta (recalculado en la misma transacción) y coincide con la referencia.
+    e = entradas_desde_bd(conn)
+    est = bateria.estado(e, bateria.recalcular(e, AHORA), AHORA)
+    fila = conn.execute("SELECT proxima_salida, consumo_plan_kwh, energia_necesaria_kwh FROM bateria_estado(%s)",
+                        (AHORA,)).fetchone()
+    assert fila is not None
+    assert all(cerca(a, b) for a, b in zip(fila, (est.proxima_salida, est.consumo_plan_kwh,
+                                                  est.energia_necesaria_kwh)))
+    salida_local = fila[0].astimezone(bateria.MADRID)
+    assert (salida_local.day, salida_local.time()) == ((17, time(9)) if x.tipo == "sin_salida" else (16, time(6, 30)))
+
+
+@pytest.mark.parametrize("dia", [date(2026, 11, 21), date(2026, 11, 22)], ids=["sabado_null", "domingo_sin_fila"])
+def test_sin_salida_en_dia_sin_salida_se_rechaza(conn: psycopg.Connection, limpio: None, dia: date) -> None:
+    _horario(conn)
+    with pytest.raises(bateria_servicio.ErrorExcepcion, match="el horario no tiene salida"):
+        bateria_servicio.registrar_excepcion(conn, NX("sin_salida", dia), AHORA)
+    assert conn.execute("SELECT count(*) FROM bateria_excepcion").fetchone() == (0,)
+
+
+@pytest.mark.parametrize(("x", "mensaje"), [
+    (NX("con_salida", date(2026, 11, 17), time(7), "indicado", km=D(200), pct=D(30)), "uno de los dos"),
+    (NX("con_salida", date(2026, 11, 17), time(7), "indicado"), "uno de los dos"),
+    (NX("con_salida", date(2026, 11, 17), time(7), "normal", km=D(200)), "no se indican"),
+    (NX("con_salida", date(2026, 11, 17), None, "normal"), "falta la hora"),
+    (NX("sin_salida", date(2026, 11, 17), time(7)), "solo se indica la fecha"),
+    (NX("con_salida", date(2026, 11, 17), time(7), "normal", pct_objetivo=D(0)), "excepción no válida"),
+], ids=["km_y_pct", "indicado_vacio", "normal_con_km", "sin_hora", "sin_salida_con_hora", "objetivo_cero"])
+def test_excepcion_no_valida(conn: psycopg.Connection, limpio: None, x: bateria_servicio.NuevaExcepcion,
+                             mensaje: str) -> None:
+    _horario(conn)
+    with pytest.raises(bateria_servicio.ErrorExcepcion, match=mensaje):
+        bateria_servicio.registrar_excepcion(conn, x, AHORA)
+    assert conn.execute("SELECT count(*) FROM bateria_excepcion").fetchone() == (0,)
+
+
+def test_segunda_excepcion_en_la_misma_fecha(conn: psycopg.Connection, limpio: None) -> None:
+    _horario(conn)
+    bateria_servicio.registrar_excepcion(conn, NX("sin_salida", date(2026, 11, 17)), AHORA)
+    with pytest.raises(bateria_servicio.ErrorExcepcion, match="ya hay una excepción activa"):
+        bateria_servicio.registrar_excepcion(conn, NX("con_salida", date(2026, 11, 17), time(7), "normal"), AHORA)
+
+
+def test_modificar_es_baja_y_alta(conn: psycopg.Connection, limpio: None) -> None:
+    _horario(conn)
+    viejo = bateria_servicio.registrar_excepcion(conn, NX("sin_salida", date(2026, 11, 17)), AHORA)
+    nuevo = bateria_servicio.modificar_excepcion(
+        conn, viejo, NX("con_salida", date(2026, 11, 17), time(7), "indicado", km=D(300)), AHORA)
+    assert conn.execute("SELECT id, anulada_en IS NULL FROM bateria_excepcion ORDER BY id").fetchall() == [
+        (viejo, False), (nuevo, True)]
+    assert conn.execute("SELECT tipo FROM bateria_salidas(%s, 1) WHERE fecha = '2026-11-17'",
+                        (AHORA,)).fetchall() == [("con_salida",)]
+
+
+def test_modificar_con_alta_no_valida_deja_la_anterior(conn: psycopg.Connection, limpio: None) -> None:
+    _horario(conn)
+    viejo = bateria_servicio.registrar_excepcion(conn, NX("con_salida", date(2026, 11, 17), time(7), "normal"), AHORA)
+    for nueva in (NX("sin_salida", date(2026, 11, 21)),                                       # validación
+                  NX("con_salida", date(2026, 11, 17), time(7), "normal", pct_objetivo=D(0))):  # CHECK
+        with pytest.raises(bateria_servicio.ErrorExcepcion):
+            bateria_servicio.modificar_excepcion(conn, viejo, nueva, AHORA)
+        assert conn.execute("SELECT id, anulada_en FROM bateria_excepcion").fetchall() == [(viejo, None)]
+
+
+def test_anular_excepcion(conn: psycopg.Connection, limpio: None) -> None:
+    _horario(conn)
+    id_ = bateria_servicio.registrar_excepcion(conn, NX("sin_salida", date(2026, 11, 17)), AHORA)
+    bateria_servicio.anular_excepcion(conn, id_, AHORA)
+    with pytest.raises(bateria_servicio.ErrorExcepcion, match="no hay ninguna excepción activa"):
+        bateria_servicio.anular_excepcion(conn, id_, AHORA)

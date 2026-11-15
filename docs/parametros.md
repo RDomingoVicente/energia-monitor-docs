@@ -207,11 +207,18 @@ INSERT INTO bateria_horario (dia_iso, hora_salida) VALUES
     (1, '09:00'), (2, '09:00'), (3, '09:00'), (4, '09:00'), (5, '07:00'), (6, NULL), (7, NULL)
 ON CONFLICT (dia_iso) DO UPDATE SET hora_salida = EXCLUDED.hora_salida, actualizado_en = now();
 
-INSERT INTO bateria_excepcion (tipo, fecha, hora, consumo_km) VALUES ('viaje_largo', '2026-11-21', '07:30', 350);
+-- Con salida a otra hora y consumo normal (P75), con nivel mínimo opcional:
+INSERT INTO bateria_excepcion (tipo, fecha, hora_salida, consumo_modo, pct_objetivo)
+    VALUES ('con_salida', '2026-11-20', '06:30', 'normal', 80);
+-- Con consumo indicado (km o pct, uno solo):
+INSERT INTO bateria_excepcion (tipo, fecha, hora_salida, consumo_modo, km)
+    VALUES ('con_salida', '2026-11-21', '07:30', 'indicado', 350);
+-- Sin salida (solo en un día que tenga salida en el horario; por SQL no se comprueba):
+INSERT INTO bateria_excepcion (tipo, fecha) VALUES ('sin_salida', '2026-11-23');
 UPDATE bateria_excepcion SET anulada_en = now() WHERE id = 3;  -- baja
 ```
 
-Un viaje largo con fecha de hoy o pasada cambia trayectos ya guardados:
-después, `bateria recalcular`. El horario y las excepciones futuras no lo
+Una excepción con consumo indicado con fecha de hoy o pasada cambia
+trayectos ya guardados: después, `bateria recalcular`. El horario y las excepciones futuras no lo
 necesitan.
 
