@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batería: estados del nivel</title>
+</head>
+<body>
+
+
+<style>
+body{margin:0;background:#0D1117}
+.m{font-family:ui-monospace,'JetBrains Mono','SF Mono',Menlo,Consolas,monospace}
+.pn{background:#161B22;border:1px solid #2A313B;border-radius:6px}
+.ph{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #2A313B}
+.pt{margin:0;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9DA7B3}
+.k{font-size:12px;color:#8B949E;margin:0}
+.sub{margin:4px 0 0;font-size:13px;color:#9DA7B3;line-height:1.45}
+.side a{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:6px;color:#9DA7B3;text-decoration:none;font-size:14px}
+.side a.on{background:#1F2630;color:#E6EDF3;box-shadow:inset 2px 0 0 #2F81F7}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid #2A313B;border-radius:4px;font-size:12px;color:#9DA7B3}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.inp{height:40px;box-sizing:border-box;border:1px solid #3A424D;border-radius:6px;padding:0 10px;font:500 14px/1 ui-monospace,'SF Mono',Menlo,Consolas,monospace;color:#E6EDF3;background:#0D1117;width:100%;color-scheme:dark}
+.btn{display:flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#1F6FEB;color:#FFFFFF;font:600 14px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;width:100%}
+.del{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#F85149;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #3A424D;border-radius:6px;overflow:hidden}
+.seg label{display:flex;align-items:center;justify-content:center;height:38px;font-size:13px;font-weight:600;color:#9DA7B3;border-left:1px solid #3A424D}
+.seg label:first-child{border-left:0}
+.seg label.on{background:#1F3A5F;color:#E6EDF3}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:#8B949E;font-size:12px;padding:8px 14px;border-bottom:1px solid #2A313B}
+td{padding:10px 14px;border-bottom:1px solid #21272F;color:#C9D1D9;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.r{text-align:right}
+.tag{font-size:11px;font-weight:600;border-radius:4px;padding:2px 6px;white-space:nowrap}
+
+.sw{position:relative;width:40px;height:22px;flex:none;display:inline-block}
+.sw input{position:absolute;inset:0;opacity:0;margin:0;width:40px;height:22px}
+.sw span{position:absolute;inset:0;border-radius:11px;background:#3A424D}
+.sw span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#C9D1D9}
+.sw.on span{background:#1F6FEB}
+.sw.on span::after{left:21px;background:#FFFFFF}
+.btn2{display:flex;align-items:center;justify-content:center;height:40px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#C9D1D9;font:600 14px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;width:100%}
+.lk{display:inline-flex;align-items:center;height:28px;padding:0 8px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#58A6FF;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;text-decoration:none}
+.fl{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid #3A424D;border-radius:4px;background:transparent;color:#9DA7B3;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif}
+.fl.on{background:#1F3A5F;border-color:#1F6FEB;color:#E6EDF3}
+.big{margin:6px 0 0;font-size:26px;font-weight:600;color:#E6EDF3;line-height:1.1}
+.sub{margin:4px 0 0;font-size:13px;color:#9DA7B3;line-height:1.45}
+.r{text-align:right}
+
+button,.lk,.del,.mod,.fl,.chip,.tag,.btn,.btn2,th,td.r{white-space:nowrap}
+</style>
+
+<div style="width: 1280px; height: 860px; font-family: -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: #E6EDF3; background: #0D1117; font-variant-numeric: tabular-nums; box-sizing: border-box; padding: 28px 32px; display: flex; flex-direction: column; gap: 22px">
+<header>
+<h1 style="margin: 0; font-size: 22px; font-weight: 600">Casilla «Nivel»: tres estados según lo ocurrido desde la última lectura</h1>
+<p class="sub" style="margin-top: 6px">Lo decide <span class="m" style="color: #E6EDF3">v_bateria_estado.confianza</span> ∈ <span class="m" style="color: #E6EDF3">leido | leido_carga | estimado</span>. Los tres ejemplos son una secuencia: lectura, carga nocturna y dos trayectos.</p>
+</header>
+<div class="m" style="display: flex; align-items: center; gap: 12px; font-size: 12px; color: #9DA7B3; flex-wrap: wrap">
+<span class="tag" style="color: #3FB950; background: #12261A">LEÍDO</span><svg aria-hidden="true" width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="#8B949E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h22"></path><path d="m19 2 5 5-5 5"></path></svg><span>carga medida</span><svg aria-hidden="true" width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="#8B949E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h22"></path><path d="m19 2 5 5-5 5"></path></svg>
+<span class="tag" style="color: #58A6FF; background: #132339">LEÍDO + CARGA</span><svg aria-hidden="true" width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="#8B949E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h22"></path><path d="m19 2 5 5-5 5"></path></svg><span>trayecto (desconexión ≥ 30 min)</span><svg aria-hidden="true" width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="#8B949E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h22"></path><path d="m19 2 5 5-5 5"></path></svg>
+<span class="tag" style="color: #D29922; background: #2B2111">ESTIMADO</span><svg aria-hidden="true" width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="#8B949E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h22"></path><path d="m19 2 5 5-5 5"></path></svg><span>nueva lectura</span><svg aria-hidden="true" width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="#8B949E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h22"></path><path d="m19 2 5 5-5 5"></path></svg>
+<span class="tag" style="color: #3FB950; background: #12261A">LEÍDO</span>
+</div>
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 class="pt">Escritorio · indicador superior de Inicio</h2>
+<div style="display: flex; gap: 24px"><div style="display: flex; flex-direction: column; gap: 8px">
+<p class="k m">1 · Al anotar la lectura</p>
+<div class="pn" style="padding: 14px 16px; width: 290px">
+<div style="display: flex; justify-content: space-between"><p class="k">Nivel</p><span class="tag m" style="color: #3FB950; background: #12261A">LEÍDO</span></div>
+<p class="big m" style="font-size: 30px">52 %</p><p class="sub m">47,5 / 91,3 kWh</p>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p class="k m">2 · Cargando o tras cargar, sin trayectos</p>
+<div class="pn" style="padding: 14px 16px; width: 290px">
+<div style="display: flex; justify-content: space-between"><p class="k">Nivel</p><span class="tag m" style="color: #58A6FF; background: #132339">LEÍDO + CARGA</span></div>
+<p class="big m" style="font-size: 30px">70 %</p><p class="sub m">64,0 / 91,3 kWh</p>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p class="k m">3 · Tras uno o más trayectos</p>
+<div class="pn" style="padding: 14px 16px; width: 290px">
+<div style="display: flex; justify-content: space-between"><p class="k">Nivel</p><span class="tag m" style="color: #D29922; background: #2B2111">ESTIMADO</span></div>
+<p class="big m" style="font-size: 30px">38 %</p><p class="sub m">34,7 / 91,3 kWh</p>
+</div>
+</div>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 class="pt">Móvil · panel Batería (también el panel ancho de escritorio)</h2>
+<div style="display: flex; gap: 24px; align-items: flex-start"><section class="pn" style="width: 360px">
+<div class="ph"><h3 class="pt">Batería</h3><span class="tag m" style="color: #3FB950; background: #12261A">LEÍDO</span></div>
+<div style="padding: 14px">
+<div style="display: flex; align-items: baseline; gap: 10px"><span class="m" style="font-size: 40px; font-weight: 600; line-height: 1">52 %</span><span class="m" style="font-size: 13px; color: #9DA7B3">47,5 / 91,3 kWh</span></div>
+<div style="margin-top: 16px"><div style="position: relative; height: 14px; background: #21272F; border-radius: 3px"><div style="width: 52%; height: 14px; background: #2F81F7; border-radius: 3px 0 0 3px"></div><div style="position: absolute; left: 25%; top: -4px; width: 2px; height: 22px; background: #D29922"></div></div></div>
+<p class="m" style="margin: 12px 0 0; font-size: 12px; color: #C9D1D9">leído hoy 19:42</p>
+<p class="m" style="margin: 2px 0 0; font-size: 12px; color: #8B949E">sin cargas ni trayectos desde entonces</p>
+<p class="sub" style="margin-top: 10px">Valor exacto. El aviso de «sin lecturas» desaparece.</p>
+</div>
+</section>
+<section class="pn" style="width: 360px">
+<div class="ph"><h3 class="pt">Batería</h3><span class="tag m" style="color: #58A6FF; background: #132339">LEÍDO + CARGA</span></div>
+<div style="padding: 14px">
+<div style="display: flex; align-items: baseline; gap: 10px"><span class="m" style="font-size: 40px; font-weight: 600; line-height: 1">70 %</span><span class="m" style="font-size: 13px; color: #9DA7B3">64,0 / 91,3 kWh</span></div>
+<div style="margin-top: 16px"><div style="position: relative; height: 14px; background: #21272F; border-radius: 3px"><div style="width: 52%; height: 14px; background: #2F81F7; border-radius: 3px 0 0 3px"></div><div style="position: absolute; left: 52%; width: 18%; top: 0; height: 14px; background: #3FB950"></div><div style="position: absolute; left: 25%; top: -4px; width: 2px; height: 22px; background: #D29922"></div></div></div>
+<p class="m" style="margin: 12px 0 0; font-size: 12px; color: #C9D1D9">52 % leído 19:42 + 19,3 kWh cargados</p>
+<p class="m" style="margin: 2px 0 0; font-size: 12px; color: #8B949E">× eficiencia de carga 0,86 = +18 pts (16,6 kWh)</p>
+<p class="sub" style="margin-top: 10px">Alta fiabilidad: la energía la mide el cargador.</p>
+</div>
+</section>
+<section class="pn" style="width: 360px">
+<div class="ph"><h3 class="pt">Batería</h3><span class="tag m" style="color: #D29922; background: #2B2111">ESTIMADO</span></div>
+<div style="padding: 14px">
+<div style="display: flex; align-items: baseline; gap: 10px"><span class="m" style="font-size: 40px; font-weight: 600; line-height: 1">38 %</span><span class="m" style="font-size: 13px; color: #9DA7B3">34,7 / 91,3 kWh</span></div>
+<div style="margin-top: 16px"><div style="position: relative; height: 14px; background: #21272F; border-radius: 3px"><div style="width: 38%; height: 14px; background: #2F81F7; border-radius: 3px 0 0 3px"></div><div style="position: absolute; left: 25%; top: -4px; width: 2px; height: 22px; background: #D29922"></div></div></div>
+<p class="m" style="margin: 12px 0 0; font-size: 12px; color: #C9D1D9">70 % tras la carga − 2 trayectos estimados</p>
+<p class="m" style="margin: 2px 0 0; font-size: 12px; color: #8B949E">−29,2 kWh (mediana de trayectos) = −32 pts</p>
+<p class="sub" style="margin-top: 10px">Confianza decreciente. Aviso si pasa el umbral sin lectura.</p>
+</div>
+</section>
+</div>
+<p class="k" style="line-height: 1.5">Barra: azul = nivel desde la lectura · verde = energía cargada desde la lectura · marca ámbar = reserva 25 %. La etiqueta usa texto y color, nunca solo color.</p>
+</section>
+</div>
+
+</body>
+</html>

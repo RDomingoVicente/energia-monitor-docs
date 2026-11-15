@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batería: excepciones (escritorio)</title>
+</head>
+<body>
+
+
+<style>
+body{margin:0;background:#0D1117}
+.m{font-family:ui-monospace,'JetBrains Mono','SF Mono',Menlo,Consolas,monospace}
+.pn{background:#161B22;border:1px solid #2A313B;border-radius:6px}
+.ph{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #2A313B}
+.pt{margin:0;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9DA7B3}
+.k{font-size:12px;color:#8B949E;margin:0}
+.sub{margin:4px 0 0;font-size:13px;color:#9DA7B3;line-height:1.45}
+.side a{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:6px;color:#9DA7B3;text-decoration:none;font-size:14px}
+.side a.on{background:#1F2630;color:#E6EDF3;box-shadow:inset 2px 0 0 #2F81F7}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid #2A313B;border-radius:4px;font-size:12px;color:#9DA7B3}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.inp{height:40px;box-sizing:border-box;border:1px solid #3A424D;border-radius:6px;padding:0 10px;font:500 14px/1 ui-monospace,'SF Mono',Menlo,Consolas,monospace;color:#E6EDF3;background:#0D1117;width:100%;color-scheme:dark}
+.btn{display:flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#1F6FEB;color:#FFFFFF;font:600 14px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;width:100%}
+.mod{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#58A6FF;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif}
+.del{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#F85149;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #3A424D;border-radius:6px;overflow:hidden}
+.seg label{display:flex;align-items:center;justify-content:center;height:38px;font-size:13px;font-weight:600;color:#9DA7B3;border-left:1px solid #3A424D}
+.seg label:first-child{border-left:0}
+.seg label.on{background:#1F3A5F;color:#E6EDF3}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:#8B949E;font-size:12px;padding:8px 10px;border-bottom:1px solid #2A313B}
+td{padding:10px 10px;border-bottom:1px solid #21272F;color:#C9D1D9;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.r{text-align:right}
+.tag{font-size:11px;font-weight:600;border-radius:4px;padding:2px 6px;white-space:nowrap}
+
+button,.lk,.del,.mod,.fl,.chip,.tag,.btn,.btn2,th,td.r{white-space:nowrap}
+</style>
+
+<div style="width: 1280px; height: 900px; display: flex; font-family: -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: #E6EDF3; background: #0D1117; font-variant-numeric: tabular-nums">
+
+<nav class="side" aria-label="Secciones" style="width: 220px; flex: none; border-right: 1px solid #2A313B; background: #11161D; padding: 14px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box">
+<div style="display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2F81F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+<div><p class="m" style="margin: 0; font-size: 13px; font-weight: 600">energia-monitor</p><p class="k m" style="font-size: 11px">formulario · v0.5.0</p></div>
+</div>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"></rect><path d="M22 11v2"></path><path d="M6 10v4"></path><path d="M10 10v4"></path></svg>Inicio</a>
+<a href="#" class="on" aria-current="page"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h18"></path></svg>Excepciones</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>Horario</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>Historial</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"></path><path d="M4 10V3"></path><path d="M12 21v-9"></path><path d="M12 8V3"></path><path d="M20 21v-5"></path><path d="M20 12V3"></path><path d="M2 14h4"></path><path d="M10 8h4"></path><path d="M18 16h4"></path></svg>Parámetros</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>Avisos<span class="m" aria-label="2 activos" style="margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #5A4316; color: #FFFFFF; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center">2</span></a>
+<div style="flex: 1"></div>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>Ayuda</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="m7 15 4-4 3 3 5-6"></path></svg>Grafana</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>/salud</a>
+</nav>
+
+<div style="flex: 1; display: flex; flex-direction: column; min-width: 0">
+<header style="height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid #2A313B">
+<p class="m" style="margin: 0; font-size: 13px; color: #8B949E">formulario / <span style="color: #E6EDF3">excepciones</span></p>
+<div style="display: flex; gap: 8px">
+<a href="#" class="chip m" style="color: #E3C27A; border-color: #5A4316; background: #1E1A10; text-decoration: none"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>2 avisos</a>
+<span class="chip m"><span class="dot" style="background: #3FB950"></span>viaris 192.168.1.34</span>
+<span class="chip m"><span class="dot" style="background: #3FB950"></span>postgres</span>
+<span class="chip m">recálculo 19:42</span>
+</div>
+</header>
+
+<main style="flex: 1; padding: 20px 24px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-content: start; box-sizing: border-box">
+
+<div style="display: flex; flex-direction: column; gap: 16px; min-width: 0">
+<section class="pn">
+<div class="ph"><h2 class="pt">Próximas excepciones</h2><span class="k m">3 activas · 1 por fecha</span></div>
+<table>
+<thead><tr><th>Fecha</th><th>Tipo</th><th>Salida</th><th class="r">Consumo prev.</th><th class="r">Objetivo</th><th class="r"><span style="position: absolute; left: -9999px">Acciones</span></th></tr></thead>
+<tbody>
+<tr><td class="m">jue 19/11<span class="k" style="display: block; font-family: -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; margin-top: 2px">Teletrabajo</span></td><td><span class="tag" style="color: #C9D1D9; background: #2A313B">sin salida</span></td><td class="m" style="color: #8B949E">—</td><td class="r m" style="color: #8B949E">0,0 kWh</td><td class="r m" style="color: #8B949E">—</td><td class="r"><div style="display: flex; gap: 6px; justify-content: flex-end"><button type="button" class="mod">Modificar</button><button type="button" class="del">Dar de baja</button></div></td></tr>
+<tr><td class="m">dom 22/11<span class="k" style="display: block; font-family: -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; margin-top: 2px">Viaje a Zaragoza</span></td><td><span class="tag" style="color: #58A6FF; background: #132339">con salida</span></td><td class="m">07:00</td><td class="r m">41,4 kWh<span style="color: #8B949E; display: block; font-size: 11px; margin-top: 2px">indicado · 180 km</span></td><td class="r m">70 %</td><td class="r"><div style="display: flex; gap: 6px; justify-content: flex-end"><button type="button" class="mod">Modificar</button><button type="button" class="del">Dar de baja</button></div></td></tr>
+<tr><td class="m">sáb 28/11</td><td><span class="tag" style="color: #58A6FF; background: #132339">con salida</span></td><td class="m">06:30</td><td class="r m">31,0 kWh<span style="color: #8B949E; display: block; font-size: 11px; margin-top: 2px">normal · P75</span></td><td class="r m">80 %<span style="color: #8B949E; display: block; font-size: 11px; margin-top: 2px">mínimo</span></td><td class="r"><div style="display: flex; gap: 6px; justify-content: flex-end"><button type="button" class="mod">Modificar</button><button type="button" class="del">Dar de baja</button></div></td></tr>
+</tbody>
+</table>
+</section>
+
+<section class="pn">
+<div class="ph"><h2 class="pt">Pasadas · 30 días</h2><span class="k m">consumo previsto frente a medido</span></div>
+<table>
+<thead><tr><th>Fecha</th><th>Tipo</th><th class="r">Previsto</th><th class="r">Estimado real</th><th class="r">Desvío</th><th>Estado</th></tr></thead>
+<tbody class="m">
+<tr><td>jue 05/11</td><td><span class="tag" style="color: #58A6FF; background: #132339">con salida</span></td><td class="r">48,3 kWh</td><td class="r">51,9 kWh</td><td class="r" style="color: #D29922">+7 %</td><td style="color: #9DA7B3">cumplida</td></tr>
+<tr><td>mar 27/10</td><td><span class="tag" style="color: #C9D1D9; background: #2A313B">sin salida</span></td><td class="r">0,0 kWh</td><td class="r">0,0 kWh</td><td class="r">0 %</td><td style="color: #9DA7B3">cumplida</td></tr>
+<tr><td style="color: #8B949E">sáb 24/10</td><td><span class="tag" style="color: #58A6FF; background: #132339">con salida</span></td><td class="r" style="color: #8B949E">—</td><td class="r" style="color: #8B949E">—</td><td class="r" style="color: #8B949E">—</td><td style="color: #8B949E">dada de baja</td></tr>
+</tbody>
+</table>
+</section>
+</div>
+
+<form class="pn" action="#" method="post" style="align-self: start">
+<div class="ph"><h2 class="pt">Nueva excepción</h2></div>
+<div style="padding: 14px; display: flex; flex-direction: column; gap: 14px">
+<fieldset style="border: 0; margin: 0; padding: 0">
+<legend class="k" style="margin-bottom: 6px">Tipo</legend>
+<div class="seg" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+<label class="on"><input type="radio" name="tipo" value="con_salida" checked="">Con salida</label>
+<label><input type="radio" name="tipo" value="sin_salida">Sin salida</label>
+</div>
+</fieldset>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="xf" class="k">Fecha</label><input id="xf" name="fecha" class="inp" type="date" value="2026-12-06"></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="xh" class="k">Hora de salida</label><input id="xh" name="hora" class="inp" type="time" value="08:00"></div>
+</div>
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+<legend class="k" style="margin-bottom: 6px">Consumo previsto</legend>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border: 1px solid #1F6FEB; border-radius: 6px; background: #132339; cursor: pointer">
+<input type="radio" name="consumo" value="normal" checked="" style="width: 18px; height: 18px; margin: 0; accent-color: #2F81F7">
+<span style="flex: 1; font-size: 14px; color: #E6EDF3">Normal (P75)</span><span class="m" style="font-size: 13px; color: #58A6FF">31,0 kWh</span>
+</label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border: 1px solid #3A424D; border-radius: 6px; cursor: pointer">
+<input type="radio" name="consumo" value="indicado" style="width: 18px; height: 18px; margin: 0; accent-color: #2F81F7">
+<span style="flex: 1; font-size: 14px; color: #C9D1D9">Indicar consumo</span>
+</label>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-left: 28px; opacity: .45">
+<div style="display: flex; align-items: center; gap: 6px"><input name="km" class="inp" type="number" inputmode="numeric" min="0" placeholder="km" aria-label="Kilómetros" disabled=""><span class="k m">km</span></div>
+<div style="display: flex; align-items: center; gap: 6px"><input name="pct" class="inp" type="number" inputmode="numeric" min="0" max="100" placeholder="%" aria-label="Porcentaje de batería" disabled=""><span class="k m">%</span></div>
+</div>
+</fieldset>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="xmin" class="k">Nivel mínimo a la salida (opcional)</label>
+<div style="display: flex; align-items: center; gap: 6px"><input id="xmin" name="pct_objetivo" class="inp" type="number" inputmode="numeric" min="0" max="100" placeholder="—" style="max-width: 120px"><span class="k m">%</span></div>
+<p class="k" style="line-height: 1.45">Si lo indicas, el objetivo es el mayor entre este nivel y reserva + consumo, sin pasar del tope.</p>
+</div>
+<div class="m" style="font-size: 12px; color: #9DA7B3; background: #0D1117; border: 1px solid #2A313B; border-radius: 6px; padding: 10px 12px; line-height: 1.6">consumo normal P75 = <span style="color: #E6EDF3">31,0 kWh</span><br>objetivo = 25 % + 34 pts = <span style="color: #58A6FF">59 %</span></div>
+<p class="k" style="line-height: 1.45">Por defecto se usa el consumo normal (P75). Elige «Indicar consumo» para un viaje largo (km o %). «Sin salida» solo se admite en días que el horario marca con salida. «Modificar» carga aquí la excepción; al guardar, la anterior queda dada de baja.</p>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="xn" class="k">Nota (opcional)</label><input id="xn" name="nota" class="inp" type="text" maxlength="80"></div>
+<button type="submit" class="btn">Añadir excepción</button>
+</div>
+</form>
+
+</main>
+</div>
+</div>
+
+</body>
+</html>

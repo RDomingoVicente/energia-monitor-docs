@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batería: carga externa (escritorio)</title>
+</head>
+<body>
+
+
+<style>
+body{margin:0;background:#0D1117}
+.m{font-family:ui-monospace,'JetBrains Mono','SF Mono',Menlo,Consolas,monospace}
+.pn{background:#161B22;border:1px solid #2A313B;border-radius:6px}
+.ph{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #2A313B}
+.pt{margin:0;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9DA7B3}
+.k{font-size:12px;color:#8B949E;margin:0}
+.sub{margin:4px 0 0;font-size:13px;color:#9DA7B3;line-height:1.45}
+.side a{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:6px;color:#9DA7B3;text-decoration:none;font-size:14px}
+.side a.on{background:#1F2630;color:#E6EDF3;box-shadow:inset 2px 0 0 #2F81F7}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid #2A313B;border-radius:4px;font-size:12px;color:#9DA7B3}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.inp{height:40px;box-sizing:border-box;border:1px solid #3A424D;border-radius:6px;padding:0 10px;font:500 14px/1 ui-monospace,'SF Mono',Menlo,Consolas,monospace;color:#E6EDF3;background:#0D1117;width:100%;color-scheme:dark}
+.btn{display:flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#1F6FEB;color:#FFFFFF;font:600 14px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;width:100%}
+.del{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#F85149;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #3A424D;border-radius:6px;overflow:hidden}
+.seg label{display:flex;align-items:center;justify-content:center;height:38px;font-size:13px;font-weight:600;color:#9DA7B3;border-left:1px solid #3A424D}
+.seg label:first-child{border-left:0}
+.seg label.on{background:#1F3A5F;color:#E6EDF3}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:#8B949E;font-size:12px;padding:8px 14px;border-bottom:1px solid #2A313B}
+td{padding:10px 14px;border-bottom:1px solid #21272F;color:#C9D1D9;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.r{text-align:right}
+.tag{font-size:11px;font-weight:600;border-radius:4px;padding:2px 6px;white-space:nowrap}
+
+.sw{position:relative;width:40px;height:22px;flex:none;display:inline-block}
+.sw input{position:absolute;inset:0;opacity:0;margin:0;width:40px;height:22px}
+.sw span{position:absolute;inset:0;border-radius:11px;background:#3A424D}
+.sw span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#C9D1D9}
+.sw.on span{background:#1F6FEB}
+.sw.on span::after{left:21px;background:#FFFFFF}
+.btn2{display:flex;align-items:center;justify-content:center;height:40px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#C9D1D9;font:600 14px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;width:100%}
+.lk{display:inline-flex;align-items:center;height:28px;padding:0 8px;border:1px solid #3A424D;border-radius:6px;background:transparent;color:#58A6FF;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;text-decoration:none}
+.fl{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid #3A424D;border-radius:4px;background:transparent;color:#9DA7B3;font:600 12px/1 -apple-system,'Segoe UI',Roboto,Inter,sans-serif}
+.fl.on{background:#1F3A5F;border-color:#1F6FEB;color:#E6EDF3}
+.big{margin:6px 0 0;font-size:26px;font-weight:600;color:#E6EDF3;line-height:1.1}
+.sub{margin:4px 0 0;font-size:13px;color:#9DA7B3;line-height:1.45}
+.r{text-align:right}
+
+button,.lk,.del,.mod,.fl,.chip,.tag,.btn,.btn2,th,td.r{white-space:nowrap}
+</style>
+
+<div style="width: 1280px; height: 900px; display: flex; font-family: -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: #E6EDF3; background: #0D1117; font-variant-numeric: tabular-nums">
+<nav class="side" aria-label="Secciones" style="width: 220px; flex: none; border-right: 1px solid #2A313B; background: #11161D; padding: 14px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box">
+<div style="display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2F81F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+<div><p class="m" style="margin: 0; font-size: 13px; font-weight: 600">energia-monitor</p><p class="k m" style="font-size: 11px">formulario · v0.5.0</p></div>
+</div>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"></rect><path d="M22 11v2"></path><path d="M6 10v4"></path><path d="M10 10v4"></path></svg>Inicio</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h18"></path></svg>Excepciones</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>Horario</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>Historial</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"></path><path d="M4 10V3"></path><path d="M12 21v-9"></path><path d="M12 8V3"></path><path d="M20 21v-5"></path><path d="M20 12V3"></path><path d="M2 14h4"></path><path d="M10 8h4"></path><path d="M18 16h4"></path></svg>Parámetros</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>Avisos<span class="m" aria-label="2 activos" style="margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #5A4316; color: #FFFFFF; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center">2</span></a>
+<div style="flex: 1"></div>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>Ayuda</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="m7 15 4-4 3 3 5-6"></path></svg>Grafana</a>
+<a href="#"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>/salud</a>
+</nav>
+<div style="flex: 1; display: flex; flex-direction: column; min-width: 0">
+<header style="height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid #2A313B">
+<p class="m" style="margin: 0; font-size: 13px; color: #8B949E">formulario / <span style="color: #E6EDF3">carga-externa</span></p>
+<div style="display: flex; gap: 8px">
+<a href="#" class="chip m" style="color: #E3C27A; border-color: #5A4316; background: #1E1A10; text-decoration: none"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>2 avisos</a>
+<span class="chip m"><span class="dot" style="background: #3FB950"></span>viaris 192.168.1.34</span>
+<span class="chip m"><span class="dot" style="background: #3FB950"></span>postgres</span>
+<span class="chip m">recálculo 19:42</span>
+</div>
+</header>
+<main style="flex: 1; padding: 20px 24px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-content: start; box-sizing: border-box">
+<div style="display: flex; flex-direction: column; gap: 16px; min-width: 0">
+<section class="pn">
+<div class="ph"><h2 class="pt">Cargas externas</h2><span class="k m">90 días · 2 cargas · 24,40 €</span></div>
+<table><thead><tr><th>Fecha</th><th class="r">Energía</th><th class="r">Coste</th><th>Lugar o nota</th><th class="r"><span style="position: absolute; left: -9999px">Acciones</span></th></tr></thead>
+<tbody style="font-size: 13px"><tr><td class="m" style="white-space: nowrap">dom 08/11 16:20</td><td class="r m" style="color: #E6EDF3; font-weight: 600">32,5 kWh<span style="display: block; color: #8B949E; font-size: 11px; margin-top: 2px">nivel +31 pts</span></td><td class="r m">14,60 €<span style="display: block; color: #8B949E; font-size: 11px; margin-top: 2px">0,449 €/kWh</span></td><td style="color: #9DA7B3">Ionity Zaragoza</td><td class="r"><div style="display: flex; gap: 6px; justify-content: flex-end"><a href="#" class="lk">Corregir</a><a href="#" class="lk" style="color: #F85149">Anular</a></div></td></tr><tr><td class="m" style="white-space: nowrap">sáb 24/10 12:05</td><td class="r m" style="color: #E6EDF3; font-weight: 600">—<span style="display: block; color: #8B949E; font-size: 11px; margin-top: 2px">sin kWh</span></td><td class="r m">9,80 €<span style="display: block; color: #8B949E; font-size: 11px; margin-top: 2px">—</span></td><td style="color: #9DA7B3">Sin kWh: intervalo fuera de la estadística</td><td class="r"><div style="display: flex; gap: 6px; justify-content: flex-end"><a href="#" class="lk">Corregir</a><a href="#" class="lk" style="color: #F85149">Anular</a></div></td></tr></tbody></table>
+<p class="k" style="padding: 10px 14px; border-top: 1px solid #2A313B; line-height: 1.45">Se suman al nivel como una carga de casa (× eficiencia de carga) y su coste entra en el gasto del coche de Grafana. Corregir o anular, nunca borrar.</p>
+</section>
+<section role="status" style="display: flex; gap: 10px; padding: 12px 14px; border: 1px solid #5A4316; background: #1E1A10; border-radius: 6px">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D29922" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 1px"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg>
+<p style="margin: 0; font-size: 13px; color: #E3C27A; line-height: 1.45">Si al anotar una lectura el coche tiene claramente más batería de la esperada (más de umbral_carga_externa_kwh), se muestra el aviso «¿Cargaste fuera de casa?» con enlace a esta pantalla.</p>
+</section>
+</div>
+<form class="pn" action="#" method="post" style="align-self: start">
+<div class="ph"><h2 class="pt">Registrar carga externa</h2></div>
+<div style="padding: 14px; display: flex; flex-direction: column; gap: 14px">
+<p class="k" style="line-height: 1.45">Cargas hechas fuera de casa (cargador público, destino). Anótalas para que el nivel y la reconciliación cuadren. Al volver, anota también el % que marca el coche.</p>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="ef" class="k">Fecha</label><input id="ef" name="fecha" class="inp" type="date" value="2026-11-22"></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="eh" class="k">Hora aproximada</label><input id="eh" name="hora" class="inp" type="time" value="11:40"></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="ek" class="k">Energía cargada (opcional)</label><div style="display: flex; align-items: center; gap: 6px"><input id="ek" name="kwh" class="inp" type="number" inputmode="decimal" min="0" max="150" step="0.1" value="28.4"><span class="k m">kWh</span></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="ec" class="k">Coste (opcional)</label><div style="display: flex; align-items: center; gap: 6px"><input id="ec" name="coste_eur" class="inp" type="number" inputmode="decimal" min="0" step="0.01" value="12.75"><span class="k m">€</span></div></div>
+</div>
+<div class="m" style="font-size: 12px; color: #9DA7B3; background: #0D1117; border: 1px solid #2A313B; border-radius: 6px; padding: 10px 12px; line-height: 1.6">28,4 kWh × eficiencia 0,86 = <span style="color: #E6EDF3">24,4 kWh</span> → <span style="color: #58A6FF">+27 pts</span><br>coste: 0,449 €/kWh</div>
+<p class="k" style="line-height: 1.45">Sin kWh se registra igual: el nivel se fija con tu próxima lectura y ese intervalo queda fuera de la mediana y del P75.</p>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="en" class="k">Lugar o nota (opcional)</label><input id="en" name="nota" class="inp" type="text" maxlength="80" value="Zaragoza, cargador rápido"></div>
+<button type="submit" class="btn">Guardar carga externa</button>
+</div>
+</form>
+</main>
+</div>
+</div>
+
+</body>
+</html>
