@@ -167,7 +167,7 @@ def test_gasto_diario_con_eje_de_30_dias() -> None:
 
 ESTILO = (Path(__file__).resolve().parents[1] / "src" / "energia_monitor" / "formulario" / "estatico"
           / "estilo.css").read_text(encoding="utf-8")
-FUENTES_BATERIA = {"bateria_nivel", "bateria_sesion", "bateria_lectura", "bateria_trayecto", "bateria_carga_externa",
+FUENTES_BATERIA = {"bateria_nivel", "bateria_intervalo", "bateria_sesion", "bateria_lectura", "bateria_trayecto", "bateria_carga_externa",
                    "v_bateria_estado", "v_bateria_salida", "v_bateria_lectura_historial", "v_aviso",
                    "v_coste_carga_externa"}
 

@@ -148,7 +148,7 @@ datos por SQL, `bateria recalcular` (docs/parametros.md).
 | Acierto de la estimación (30 días) | Error medio con signo y error absoluto medio (pts y kWh) de las lecturas comparables, como en la página Historial |
 | Estimado frente a leído (7 días) | Leído − estimado en cada lectura comparable, en pts |
 | Próximas salidas (7 días) | Salidas con origen, consumo previsto, objetivo y energía necesaria (la primera) |
-| Trayectos recientes | Últimos 15 (sin desconexiones cortas): duración, consumo en kWh y pts, estimado y origen del consumo |
+| Trayectos recientes | Últimos 15 (sin desconexiones cortas): duración, consumo en kWh y pts, estimado, reales (tramos reconciliados; menor que el consumo si una lectura partió el trayecto y algún tramo no se pudo reconciliar) y origen del consumo |
 | Fuera de casa en el rango | Coste, kWh y €/kWh de las cargas externas del rango |
 | Cargas externas (90 días) | Cada carga externa con kWh, pts a la batería, coste, €/kWh y nota |
 

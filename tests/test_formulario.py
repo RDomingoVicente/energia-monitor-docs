@@ -12,7 +12,7 @@ import pytest
 
 from energia_monitor.formulario import formato as f
 from energia_monitor.formulario.app import CSP, App, ConfigApp, Peticion
-from energia_monitor.formulario.datos import Dia, Evento, Inicio, LecturaGuardada
+from energia_monitor.formulario.datos import Conexion, Dia, Evento, Inicio, LecturaGuardada
 from energia_monitor.formulario.html import Html, esc, h
 from energia_monitor.formulario.pantallas import inicio
 
@@ -150,7 +150,7 @@ def datos_inicio(**cambios: object) -> Inicio:
             Dia(date(2026, 11, 18), None, "sin salida", "sin-salida", None, None)]
     eventos = [Evento(AHORA - timedelta(minutes=48), "lectura", D(52), False),
                Evento(AHORA - timedelta(hours=2), "trayecto", D("-9.2"), True)]
-    return Inicio(AHORA, estado(**cambios), dias, eventos, AHORA - timedelta(minutes=50), D(0))
+    return Inicio(AHORA, estado(**cambios), dias, eventos, Conexion(AHORA - timedelta(minutes=50)), D(0))
 
 
 def texto(html: str) -> str:
@@ -195,6 +195,32 @@ def test_sin_nivel_y_coche_fuera() -> None:
     t = texto(inicio.pantalla(datos_inicio(coche="fuera", estado_conector=1,
                                            fuera_desde=AHORA - timedelta(hours=10))))
     assert "Fuera" in t and "desde 09:30 · nivel a la salida" in t
+
+
+def test_conectado_cargando_y_sin_cargar() -> None:
+    # Como en el NAS el 15-16/11: conexión ayer a las 18:00 (Madrid), carga de 02:00 a 06:00.
+    conectado = datetime(2026, 11, 15, 17, 0, 14, tzinfo=UTC)
+    d = datos_inicio()
+    d.conexion = Conexion(conectado)
+    assert "Conectado desde ayer 18:00 · evsm 4 · sin carga" in texto(inicio.pantalla(d))
+    d.conexion = Conexion(conectado, None, datetime(2026, 11, 16, 5, 0, 58, tzinfo=UTC))
+    assert "Conectado desde ayer 18:00 · sin cargar desde 06:00 · evsm 4" in texto(inicio.pantalla(d))
+    # Mientras carga, sin «conectado desde».
+    d = datos_inicio(coche="cargando", estado_conector=6)
+    d.conexion, d.potencia_w = Conexion(conectado, datetime(2026, 11, 16, 1, 0, 58, tzinfo=UTC)), D(4600)
+    t = texto(inicio.pantalla(d))
+    assert "Cargando desde 02:00 · evsm 6 · 4,6 kW" in t and "ayer 18:00" not in t
+
+
+def test_trayecto_partido_muestra_el_total_y_lo_real() -> None:
+    d = datos_inicio()
+    d.eventos = [Evento(AHORA - timedelta(hours=1), "trayecto", D("-31.74"), True, D("-10.96")),
+                 Evento(AHORA - timedelta(hours=2), "trayecto", D("-11.2"), False, D("-11.2")),
+                 Evento(AHORA - timedelta(hours=3), "trayecto", D("-9.2"), True, None)]
+    t = texto(inicio.pantalla(d))
+    assert "trayecto est. −31,7 kWh (11,0 reales)" in t
+    assert "trayecto −11,2 kWh" in t and "11,2 reales" not in t  # reconciliado entero: sin paréntesis
+    assert "trayecto est. −9,2 kWh" in t and "−9,2 kWh (" not in t
 
 
 def test_banner_de_lectura_desde_los_datos() -> None:

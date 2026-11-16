@@ -60,11 +60,13 @@ def inicio(_conn: object, _ahora: object) -> d.Inicio:
         else:
             dias.append(d.Dia(f, datetime.combine(f, time(8, 30), UTC), "horario", "horario", D(31), D(59)))
     eventos = [d.Evento(AHORA, "conexion", None, False),
-               d.Evento(AHORA - timedelta(minutes=12), "trayecto", D("-14.6"), True),
+               d.Evento(AHORA - timedelta(minutes=12), "trayecto", D("-31.74"), True, D("-10.96")),
                d.Evento(AHORA - timedelta(hours=9), "trayecto", D("-14.6"), True),
                d.Evento(AHORA - timedelta(hours=37), "carga", D("19.3"), False),
                d.Evento(AHORA - timedelta(days=2), "lectura", D(52), False)]
-    ini = d.Inicio(AHORA, estado(), dias, eventos, AHORA, D(0), {"estimado"}, D(25), D(100), None, True, True)
+    # Conectado ayer y con carga terminada: el texto más largo de la casilla del coche. 4,6 kW: potencia real.
+    conexion = d.Conexion(AHORA - timedelta(hours=25, minutes=52), None, AHORA - timedelta(hours=13, minutes=52))
+    ini = d.Inicio(AHORA, estado(), dias, eventos, conexion, D(4600), {"estimado"}, D(25), D(100), None, True, True)
     return ini
 
 

@@ -924,3 +924,64 @@ def test_0017_borra_los_avisos_de_sesiones_sin_muestreo(tmp_path: Path) -> None:
     finally:
         with psycopg.connect(autocommit=True) as admin:
             admin.execute(f'DROP DATABASE IF EXISTS "{nombre}" WITH (FORCE)')  # type: ignore[arg-type]
+
+
+# --- Trayectos partidos por una lectura en los últimos eventos (0018) -----------------------------
+
+
+def evento_trayecto(conn: psycopg.Connection) -> tuple[D, bool, D | None]:
+    fila = conn.execute("SELECT valor, estimado, real_kwh FROM v_bateria_evento_reciente WHERE tipo = 'trayecto'"
+                        ).fetchone()
+    assert fila is not None
+    return fila  # type: ignore[return-value]
+
+
+def recalcular_con(conn: psycopg.Connection, c: Any, ahora: datetime) -> None:
+    from escenarios_bateria import con_intervalos
+
+    cargar(conn, con_intervalos(c.e))
+    conn.execute("SELECT recalcular_bateria(%s)", (ahora,))
+
+
+def test_trayecto_partido_por_la_primera_lectura(conn: psycopg.Connection, limpio: None) -> None:
+    """El caso del NAS (15/11): primera lectura con el coche fuera y otra tras llegar. El tramo anterior a la
+    primera lectura no se puede reconciliar; el posterior sí. Total y estimado, con la parte real aparte."""
+    from escenarios_bateria import Constructor, t
+
+    recalcular_con(conn, Constructor().estado(t(-10), 4).trayecto(t(8), t(17)).lectura(t(15.5), 87)
+                   .lectura(t(17.25), 75), t(18))
+    valor, estimado, real = evento_trayecto(conn)
+    tramos = conn.execute("SELECT delta_kwh FROM bateria_nivel WHERE tipo = 'trayecto' ORDER BY n").fetchall()
+    assert len(tramos) == 2
+    assert estimado and conn.execute("SELECT origen_consumo FROM bateria_trayecto").fetchone() == ("inicial",)
+    # Real: 87 % − 75 % de la capacidad útil (91,3 kWh) = 10,956 kWh; total: más el tramo estimado.
+    assert cerca(real, D("-10.956"), "1e-9") and cerca(valor, tramos[0][0] + tramos[1][0], "1e-9")
+    assert valor < real
+
+
+def test_trayecto_reconciliado_entero_real_igual_al_total(conn: psycopg.Connection, limpio: None) -> None:
+    e, ahora = ESCENARIOS["lectura_durante_trayecto"]()
+    cargar(conn, e)
+    conn.execute("SELECT recalcular_bateria(%s)", (ahora,))
+    valor, estimado, real = evento_trayecto(conn)
+    assert not estimado and real == valor
+
+
+def test_trayecto_con_un_tramo_en_intervalo_incoherente(conn: psycopg.Connection, limpio: None) -> None:
+    from escenarios_bateria import Constructor, t
+
+    # 30 % → (trayecto) 60 % sin carga: incoherente; 60 % → 45 %: reconciliado.
+    recalcular_con(conn, Constructor().estado(t(-10), 4).lectura(t(6), 30).trayecto(t(8), t(12))
+                   .lectura(t(10), 60).lectura(t(13), 45), t(14))
+    estados = [f[0] for f in conn.execute("SELECT estado FROM bateria_intervalo ORDER BY desde")]
+    assert estados == ["incoherente", "reconciliado"]
+    valor, estimado, real = evento_trayecto(conn)
+    assert estimado and cerca(real, D("-13.695"), "1e-9") and valor < real  # 15 % de 91,3 kWh
+
+
+def test_trayecto_sin_tramos_reconciliados_sin_parte_real(conn: psycopg.Connection, limpio: None) -> None:
+    from escenarios_bateria import Constructor, t
+
+    recalcular_con(conn, Constructor().estado(t(-10), 4).lectura(t(6), 80).trayecto(t(8), t(10)), t(12))
+    valor, estimado, real = evento_trayecto(conn)
+    assert estimado and real is None and valor < 0

@@ -588,3 +588,47 @@ def test_todas_las_pantallas_responden(conn: psycopg.Connection, nombre_bd: str,
         html = r.cuerpo.decode()
         assert "llega en la v0.5.5" not in html
         assert "style=" not in html and not re.search(r"https?://", html), ruta
+
+
+# --- Estado del coche: conectado, cargando y sin cargar (v0.5.7) --------------------------------------
+
+
+def test_conectado_cargando_y_sin_cargar_desde(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
+    """Los cambios de estado del NAS del 15-16/11 (UTC): salida 07:59, conexión 17:00:14, carga de 01:00:58 a
+    05:00:58 con una pausa (5) de un minuto. «Desde» sale de cargador_estado, no de localtime."""
+    estados = [(datetime(2026, 11, 14, 20, 0, tzinfo=UTC), 4), (datetime(2026, 11, 15, 7, 59, 8, tzinfo=UTC), 1),
+               (datetime(2026, 11, 15, 17, 0, 14, tzinfo=UTC), 4), (datetime(2026, 11, 16, 1, 0, 58, tzinfo=UTC), 6),
+               (datetime(2026, 11, 16, 4, 6, 58, tzinfo=UTC), 5), (datetime(2026, 11, 16, 4, 7, 58, tzinfo=UTC), 6),
+               (datetime(2026, 11, 16, 5, 0, 58, tzinfo=UTC), 4)]
+    conn.cursor().executemany("INSERT INTO cargador_estado (conector, detectado_en, estado)"
+                              " VALUES ('mennekes', %s, %s)", estados)
+
+    def coche(ahora: datetime) -> str:
+        return texto(app_rw(nombre_bd, ahora).manejar(Peticion("GET", "/", CAB)).cuerpo)
+
+    # Recién conectado, sin carga en esta conexión.
+    assert "Conectado desde 18:00 · evsm 4 · sin carga" in coche(datetime(2026, 11, 15, 19, tzinfo=UTC))
+    # Cargando: desde el inicio de la carga; la pausa 6→5→6 no la corta y no sale «conectado desde».
+    t = coche(datetime(2026, 11, 16, 4, 30, tzinfo=UTC))
+    assert "Cargando desde 02:00 · evsm 6" in t and "ayer 18:00" not in t
+    # Tras la carga: desde cuándo está conectado y, aparte, desde cuándo no carga.
+    assert "Conectado desde ayer 18:00 · sin cargar desde 06:00 · evsm 4" in coche(
+        datetime(2026, 11, 16, 9, tzinfo=UTC))
+    # Una desconexión y otra conexión empiezan de cero.
+    conn.cursor().executemany("INSERT INTO cargador_estado (conector, detectado_en, estado)"
+                              " VALUES ('mennekes', %s, %s)",
+                              [(datetime(2026, 11, 16, 9, 30, tzinfo=UTC), 1),
+                               (datetime(2026, 11, 16, 12, tzinfo=UTC), 4)])
+    assert "Conectado desde 13:00 · evsm 4 · sin carga" in coche(datetime(2026, 11, 16, 13, tzinfo=UTC))
+
+
+def test_inicio_trayecto_partido_por_la_primera_lectura(conn: psycopg.Connection, nombre_bd: str,
+                                                        limpio: None) -> None:
+    from escenarios_bateria import Constructor, con_intervalos, t
+
+    c = Constructor().estado(t(-10), 4).trayecto(t(8), t(17)).lectura(t(15.5), 87).lectura(t(17.25), 75)
+    cargar(conn, con_intervalos(c.e))
+    conn.execute("SELECT recalcular_bateria(%s)", (t(18),))
+    total = conn.execute("SELECT consumo_kwh FROM bateria_trayecto").fetchone()[0]  # type: ignore[index]
+    tx = texto(app_rw(nombre_bd, t(18)).manejar(Peticion("GET", "/", CAB)).cuerpo)
+    assert f"trayecto est. −{str(round(total, 1)).replace('.', ',')} kWh (11,0 reales)" in tx

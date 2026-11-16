@@ -243,6 +243,17 @@ Entrega:
      de Inicio solo en móvil), test de visibilidad por tamaño, logo y
      favicon (formulario-maquetas.md, 3) y caja «Modelo» en el diagrama de
      la Ayuda. Pendiente: desplegar en el NAS.
+   - v0.5.7 (migración 0018), por dos fallos vistos en Inicio con los datos
+     del 15-16/11: un trayecto partido por la primera lectura (tomada con el
+     coche fuera) salía como «trayecto est. −31,7 kWh» sin decir que 11,0
+     kWh eran reales; ahora «(11,0 reales)», con `real_kwh` en
+     `v_bateria_evento_reciente` y la columna «Reales» en «Trayectos
+     recientes» de Grafana (bateria_trayecto y la estadística no cambian).
+     Y «Conectado desde» mostraba el fin de la carga: ahora conectado desde,
+     sin cargar desde y cargando desde, de `cargador_estado`. Verificado con
+     tests (el caso del NAS, trayecto reconciliado entero, tramo en
+     intervalo incoherente, secuencia de estados con la pausa 5).
+     Pendiente: desplegar en el NAS.
 4. Dashboard de batería (E2.10, segunda parte), sin migraciones ni imagen:
    `grafana/energia-bateria.json` (`uid` `energia-bateria`, el del enlace
    del formulario) con nivel ahora, próxima salida, objetivo, energía

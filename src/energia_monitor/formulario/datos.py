@@ -62,6 +62,16 @@ class Evento:
     tipo: str
     valor: Decimal | None
     estimado: bool
+    real: Decimal | None = None  # trayecto: parte reconciliada (negativa); igual a valor si lo está entero (0018)
+
+
+@dataclass(frozen=True)
+class Conexion:
+    """Del registro de estados del conector (cargador_estado), no de localtime del cargador (viaris-api.md)."""
+
+    conectado_desde: datetime | None = None  # primer estado no libre tras el último 1-2
+    cargando_desde: datetime | None = None  # si carga: inicio de la racha final de 5-6 (las pausas 6→5→6 no la cortan)
+    sin_cargar_desde: datetime | None = None  # conectado sin cargar tras cargar en esta conexión
 
 
 @dataclass(frozen=True)
@@ -77,7 +87,7 @@ class Inicio:
     estado: dict[str, Any]
     dias: list[Dia]
     eventos: list[Evento]
-    coche_desde: datetime | None
+    conexion: Conexion
     potencia_w: Decimal | None
     origen_trayectos: set[str] = field(default_factory=set)
     reserva_pct: Decimal = Decimal(25)
@@ -112,6 +122,34 @@ def estado(conn: psycopg.Connection, ahora: datetime) -> dict[str, Any]:
     fila = cur.fetchone()
     assert fila is not None
     return dict(zip(columnas, fila))
+
+
+# Estados: 1-2 libre, 5-6 cargando (viaris-api.md). Conectado: primer estado no libre tras el último libre.
+# Cargando: si el último es 5-6, el primero de su racha final de 5-6. Sin cargar: si el último no es libre ni 5-6
+# y hubo carga en esta conexión, el primer estado tras el último 5-6.
+_SQL_CONEXION = """
+WITH e AS (
+  SELECT detectado_en AS t, estado FROM cargador_estado WHERE detectado_en <= %(a)s
+), ult AS (
+  SELECT estado FROM e ORDER BY t DESC LIMIT 1
+), libre AS (
+  SELECT max(t) AS t FROM e WHERE estado IN (1, 2)
+), con AS (
+  SELECT min(e.t) AS t FROM e, libre WHERE e.estado NOT IN (1, 2) AND (libre.t IS NULL OR e.t > libre.t)
+), carga AS (
+  SELECT max(e.t) AS t FROM e, con WHERE e.estado IN (5, 6) AND e.t >= con.t
+), no_carga AS (
+  SELECT max(e.t) AS t FROM e WHERE e.estado NOT IN (5, 6)
+)
+SELECT con.t,
+       CASE WHEN ult.estado IN (5, 6) THEN
+            (SELECT min(e.t) FROM e WHERE e.estado IN (5, 6) AND e.t >= con.t
+               AND (no_carga.t IS NULL OR e.t > no_carga.t)) END,
+       CASE WHEN ult.estado NOT IN (1, 2, 5, 6) AND carga.t IS NOT NULL THEN
+            (SELECT min(e.t) FROM e WHERE e.t > carga.t) END
+FROM (SELECT 1) uno
+LEFT JOIN ult ON true LEFT JOIN con ON true LEFT JOIN carga ON true LEFT JOIN no_carga ON true
+"""
 
 
 def inicio(conn: psycopg.Connection, ahora: datetime) -> Inicio:
@@ -149,12 +187,10 @@ def inicio(conn: psycopg.Connection, ahora: datetime) -> Inicio:
         dias.append(Dia(d, salida, texto, clase, previsto, objetivo_pct))
 
     eventos = [Evento(*f) for f in conn.execute(
-        "SELECT instante, tipo, valor, estimado FROM v_bateria_evento_reciente WHERE instante <= %s"
+        "SELECT instante, tipo, valor, estimado, real_kwh FROM v_bateria_evento_reciente WHERE instante <= %s"
         " ORDER BY instante DESC, CASE tipo WHEN 'conexion' THEN 0 ELSE 1 END LIMIT 5", (ahora,))]
 
-    coche = conn.execute(
-        "SELECT detectado_en FROM cargador_estado WHERE detectado_en <= %s ORDER BY detectado_en DESC LIMIT 1",
-        (ahora,)).fetchone()
+    conexion = Conexion(*conn.execute(_SQL_CONEXION, {"a": ahora}).fetchone())  # type: ignore[misc]
     muestra = conn.execute(
         "SELECT evse_w FROM cargador_muestra WHERE instante <= %s ORDER BY instante DESC LIMIT 1", (ahora,)).fetchone()
 
@@ -170,7 +206,7 @@ def inicio(conn: psycopg.Connection, ahora: datetime) -> Inicio:
     if primera is not None:
         pct_obj_salida = salidas[primera.fecha][4]
     avisos = {f[0].split(":")[0] for f in conn.execute("SELECT clave FROM bateria_avisos(%s)", (ahora,))}
-    return Inicio(ahora, est, dias, eventos, coche[0] if coche else None, muestra[0] if muestra else None,
+    return Inicio(ahora, est, dias, eventos, conexion, muestra[0] if muestra else None,
                   origenes, reserva, tope, pct_obj_salida, "sin_lecturas" in avisos,
                   "intervalo_incoherente" in avisos)
 

@@ -48,21 +48,29 @@ franjas se probaron el 13/11/2026 con franjas inactivas y sin coche conectado.
 
 Del código de la interfaz. Verificados con la carga del 14/11/2026 (muestras
 cada 60 s): 1 libre (`event` 2), 4 conectado sin cargar (`event` 7) y 6
-cargando (`event` 6). No han aparecido 3 ni 5: su diferencia con 4 y 6 sigue
-sin aclarar.
+cargando (`event` 6). El 3 no ha aparecido.
+
+Estado 5, primera vez el 16/11/2026: a las 05:06:58 (hora de Madrid) durante
+un minuto, entre dos 6, dentro de la franja de 02:00 a 06:00. Es una pausa
+durante la carga, probablemente pedida por el coche (sin verificar). El
+formulario la trata como carga: «cargando desde» no se corta por ella.
 
 | Valor | Significado |
 |-------|-------------|
 | 1, 2 | Libre |
 | 3, 4 | Conectado (diferencia entre ambos sin aclarar) |
-| 5, 6 | Cargando |
+| 5, 6 | Cargando (5: pausa breve durante la carga, vista el 16/11/2026) |
 | 7 | Pausado |
 | 8 | Carga finalizada |
 | 32 | Inoperativo |
 | otros | 14, 30, 31, 33: encendido, apagado, seleccionado; el resto, error |
 
-`localtime` es el instante del último cambio de estado, no la hora actual
-(verificado el 14/11/2026).
+`localtime` no es la hora actual ni la del último cambio de estado: marca el
+último cambio de evento (`event`). El 15/11/2026 marcaba 18:19 con el coche
+conectado desde las 18:00:14 según las muestras (paso a 4). **No sirve como
+hora de conexión**: el proyecto la toma de `cargador_estado` (primer estado no
+libre tras el último 1 o 2). Corrige lo anotado el 14/11/2026 («último cambio
+de estado»), que coincidía porque ese día estado y evento cambiaron a la vez.
 
 ### Potencias del modulador (verificado el 14/11/2026)
 
@@ -225,8 +233,8 @@ cargador (+0,08 %), y el servicio `muestreo` del NAS, con 180 muestras,
 2. Qué hace el cargador sin ninguna franja activa (`defaultState`) y qué
    significan los campos de `stat` del planificador.
 3. Cómo reacciona a una franja creada, modificada o borrada durante una carga.
-4. Diferencia entre los estados 3 y 4, y entre 5 y 6 (con la carga del
-   14/11/2026 solo aparecieron 4 y 6).
+4. Diferencia entre los estados 3 y 4 (el 3 no ha aparecido), y confirmar
+   que el 5 es una pausa pedida por el coche (visto un minuto el 16/11/2026).
 5. Calibración de `evsePower` frente a `totalPower` (la pinza) con la curva
    horaria de i-DE.
 

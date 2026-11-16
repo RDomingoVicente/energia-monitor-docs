@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 
 from energia_monitor.formulario import formato as f
@@ -122,15 +123,24 @@ def _barra(d: Inicio, movil: bool = False) -> Html:
 def _coche(d: Inicio) -> tuple[str, str, str]:
     """(texto, clase del punto, detalle)."""
     e = d.estado
-    desde = f"desde {f.cuando(d.coche_desde, d.ahora).removeprefix('hoy ')}" if d.coche_desde else ""
+    c = d.conexion
+
+    def cuando(t: datetime | None, prefijo: str) -> str:
+        return f"{prefijo} {f.cuando(t, d.ahora).removeprefix('hoy ')}" if t else ""
+
     evsm = f"evsm {e['estado_conector']}" if e["estado_conector"] is not None else ""
     if e["coche"] == "fuera":
-        return "Fuera", "aviso", f"desde {f.cuando(e['fuera_desde'], d.ahora).removeprefix('hoy ')} · nivel a la salida"
+        return "Fuera", "aviso", f"{cuando(e['fuera_desde'], 'desde')} · nivel a la salida"
     if e["coche"] == "cargando":
+        # Mientras carga, solo desde cuándo carga (sin «conectado desde»: la línea cabe en el móvil).
         potencia = f"{f.numero((d.potencia_w or 0) / 1000)} kW" if d.potencia_w else ""
-        return "Cargando", "ok", " · ".join(x for x in (desde, evsm, potencia) if x)
+        return "Cargando", "ok", " · ".join(x for x in (cuando(c.cargando_desde, "desde"), evsm, potencia) if x)
     if e["coche"] == "en_casa":
-        return "Conectado", "azul", " · ".join(x for x in (desde, evsm, "sin carga") if x)
+        if c.sin_cargar_desde:
+            partes = (cuando(c.conectado_desde, "desde"), cuando(c.sin_cargar_desde, "sin cargar desde"), evsm)
+        else:
+            partes = (cuando(c.conectado_desde, "desde"), evsm, "sin carga")
+        return "Conectado", "azul", " · ".join(x for x in partes if x)
     return "Desconocido", "gris", "sin estado del conector"
 
 
@@ -211,7 +221,10 @@ def _evento(ev) -> tuple[str, str]:  # type: ignore[no-untyped-def]
     if ev.tipo == "carga_externa":
         return ("carga externa " + (f.kwh(ev.valor, signo=True) if ev.valor is not None else "sin kWh")), "verde"
     if ev.tipo == "trayecto":
-        return f"trayecto{' est.' if ev.estimado else ''} {f.kwh(ev.valor)}", ""
+        # Partido por una lectura con parte reconciliada: el total y lo real (0018).
+        real = (f" ({f.numero(-ev.real)} reales)" if ev.estimado and ev.real is not None and ev.valor is not None
+                and ev.real != ev.valor else "")
+        return f"trayecto{' est.' if ev.estimado else ''} {f.kwh(ev.valor)}{real}", ""
     if ev.tipo == "conexion":
         return "conexión", ""
     if ev.tipo == "inicio_carga":

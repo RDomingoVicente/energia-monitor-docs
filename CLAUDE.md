@@ -40,7 +40,9 @@ Antes de cualquier cambio, leer:
   entrega (v0.5.5): resto de pantallas y tests de interfaz con Playwright
   (tests/ui/, solo en local). v0.5.6: arreglos de la Ayuda, logo y favicon.
   Paso 4 hecho (solo JSON): `grafana/energia-bateria.json` y casa · fuera en
-  «Energía: coche»; pendiente importarlo y la aceptación en el NAS. La
+  «Energía: coche»; pendiente importarlo y la aceptación en el NAS.
+  v0.5.7: migración 0018 (trayecto partido en los eventos: total y parte
+  real) y estado del coche (conectado/cargando/sin cargar desde). La
   etapa 3 no se empieza hasta nuevo aviso.
 
 ## Estructura
@@ -75,7 +77,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0018).
+  migración nueva (la siguiente es la 0019).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de

@@ -31,6 +31,7 @@ PUBLICADAS = {
     "0015_excepcion_salida.sql": "5e7f953ff5a88afabcc2f3645d50e5e88b63d57ad7c79a139f402046ba532122",
     "0016_formulario_modelo.sql": "fd8c0dd2393f9ae3ef4143d380d678d676f277dcfd8adb6e1229ead54ec3bf25",
     "0017_sesion_sin_muestreo.sql": "90e44f2c42f4f054884c61c5ec89a725086cc0f06a551eb5b9cb0b4af37e710c",
+    "0018_evento_trayecto_partido.sql": "b6ee2147588392b4561a6ae5946a3431f08e06e9b18c1b0326d1d9659f0823ab",
 }
 
 

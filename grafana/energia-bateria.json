@@ -1603,7 +1603,7 @@
       "id": 34,
       "type": "table",
       "title": "Trayectos recientes",
-      "description": "Últimos 15 trayectos (sin las desconexiones cortas). Consumo aplicado: el reconciliado con lecturas si lo hay; si no, el estimado (mediana de los recientes), el inicial (parámetro, sin historia) o el declarado en una excepción. Vacío mientras el coche está fuera.",
+      "description": "Últimos 15 trayectos (sin las desconexiones cortas). Consumo aplicado: el reconciliado con lecturas si lo hay; si no, el estimado (mediana de los recientes), el inicial (parámetro, sin historia) o el declarado en una excepción. Vacío mientras el coche está fuera. «Reales»: parte del consumo de tramos reconciliados con lecturas; si el trayecto quedó partido por una lectura y algún tramo no se pudo reconciliar, es menor que el consumo.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${ds}"
@@ -1692,6 +1692,22 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Reales (kWh)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Origen"
             },
             "properties": [
@@ -1723,7 +1739,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM salida AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(salida AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS \"Salida\",\n  CASE WHEN llegada IS NULL THEN 'fuera' ELSE (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM llegada AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(llegada AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') END AS \"Llegada\",\n  extract(epoch FROM coalesce(llegada, now()) - salida) / 3600 AS \"Duración (h)\",\n  consumo_kwh AS \"Consumo (kWh)\",\n  consumo_kwh / bateria_param('capacidad_util_kwh', salida) * 100 AS \"Consumo (pts)\",\n  consumo_estimado_kwh AS \"Estimado (kWh)\",\n  CASE origen_consumo\n    WHEN 'reconciliado' THEN 'Reconciliado con lecturas'\n    WHEN 'estimado' THEN 'Estimado (mediana)'\n    WHEN 'inicial' THEN 'Inicial (parámetro)'\n    WHEN 'declarado' THEN 'Declarado (excepción)'\n    WHEN 'cero' THEN 'Cero'\n  END AS \"Origen\",\n  CASE WHEN viaje_largo THEN 'sí' END AS \"Viaje largo\"\nFROM bateria_trayecto\nWHERE NOT corto\nORDER BY salida DESC\nLIMIT 15"
+          "rawSql": "SELECT\n  (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM salida AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(salida AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS \"Salida\",\n  CASE WHEN llegada IS NULL THEN 'fuera' ELSE (ARRAY['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow FROM llegada AT TIME ZONE 'Europe/Madrid')::integer] || ' ' || to_char(llegada AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') END AS \"Llegada\",\n  extract(epoch FROM coalesce(llegada, now()) - salida) / 3600 AS \"Duración (h)\",\n  consumo_kwh AS \"Consumo (kWh)\",\n  consumo_kwh / bateria_param('capacidad_util_kwh', salida) * 100 AS \"Consumo (pts)\",\n  consumo_estimado_kwh AS \"Estimado (kWh)\",\n  -- Tramos en intervalos reconciliados (como real_kwh de v_bateria_evento_reciente, 0018): igual al consumo si\n  -- el trayecto está reconciliado entero; vacío si ninguno.\n  (SELECT - sum(b.delta_kwh)\n   FROM bateria_nivel b\n   CROSS JOIN LATERAL (SELECT a.instante FROM bateria_nivel a\n                       WHERE a.tipo IN ('lectura', 'carga_completa') AND a.n > b.n\n                       ORDER BY a.n LIMIT 1) sig\n   JOIN bateria_intervalo i ON i.hasta = sig.instante AND i.estado = 'reconciliado'\n   WHERE b.tipo = 'trayecto' AND b.conector = bateria_trayecto.conector\n     AND b.trayecto_salida = bateria_trayecto.salida) AS \"Reales (kWh)\",\n  CASE origen_consumo\n    WHEN 'reconciliado' THEN 'Reconciliado con lecturas'\n    WHEN 'estimado' THEN 'Estimado (mediana)'\n    WHEN 'inicial' THEN 'Inicial (parámetro)'\n    WHEN 'declarado' THEN 'Declarado (excepción)'\n    WHEN 'cero' THEN 'Cero'\n  END AS \"Origen\",\n  CASE WHEN viaje_largo THEN 'sí' END AS \"Viaje largo\"\nFROM bateria_trayecto\nWHERE NOT corto\nORDER BY salida DESC\nLIMIT 15"
         }
       ]
     },

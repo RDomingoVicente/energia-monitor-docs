@@ -179,6 +179,27 @@ def test_trayectos_recientes(ro: psycopg.Connection, conn: psycopg.Connection) -
     consumo = conn.execute("SELECT consumo_kwh FROM bateria_trayecto WHERE NOT corto").fetchone()[0]
     assert (tr["Salida"], tr["Llegada"], tr["Duración (h)"]) == ("lun 16/11 07:00", "lun 16/11 13:00", 6)
     assert tr["Consumo (kWh)"] == consumo and tr["Origen"] == "Reconciliado con lecturas"
+    # Reconciliado entero: lo real es todo el consumo.
+    assert tr["Reales (kWh)"] == consumo
+
+
+def test_trayecto_partido_reales_menor_que_el_consumo(nombre_bd: str, conn: psycopg.Connection) -> None:
+    """El caso del NAS: primera lectura con el coche fuera. «Reales» es solo el tramo reconciliado."""
+    limpiar(conn)
+    c = Constructor().estado(t(-10), 4).trayecto(t(8), t(17)).lectura(t(15.5), 87).lectura(t(17.25), 75)
+    cargar(conn, con_intervalos(c.e))
+    conn.execute("SELECT recalcular_bateria(%s)", (t(18),))  # después de la llegada (t 17) y de la segunda lectura
+    db.configurar_rol_grafana(conn, CLAVE)
+    try:
+        with psycopg.connect(dbname=nombre_bd, user="grafana_ro", password=CLAVE, host=os.environ["PGHOST"],
+                             autocommit=True) as ro:
+            nombres, todas = filas(ro, PANELES["Trayectos recientes"]["targets"][0]["rawSql"])
+        (tr,) = [dict(zip(nombres, f)) for f in todas]
+        real = conn.execute("SELECT - real_kwh FROM v_bateria_evento_reciente WHERE tipo = 'trayecto'").fetchone()[0]
+        assert cerca(tr["Reales (kWh)"], real) and cerca(real, D("10.956"))
+        assert tr["Consumo (kWh)"] > tr["Reales (kWh)"] and tr["Origen"] == "Inicial (parámetro)"
+    finally:
+        limpiar(conn)
 
 
 def test_anotaciones(ro: psycopg.Connection) -> None:

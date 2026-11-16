@@ -119,7 +119,10 @@ falta energía; marca ámbar en la reserva y blanca en el objetivo.
 - kWh con un decimal; porcentajes enteros; pts enteros salvo medias (1 decimal).
 - Etiquetas de estado del nivel: `LEÍDO`, `LEÍDO + CARGA`, `ESTIMADO`.
 - Eventos: «lectura 52 %», «conexión», «trayecto est. −9,2 kWh», «carga +19,3
-  kWh», «inicio carga (en curso)».
+  kWh», «inicio carga (en curso)». Trayecto partido por una lectura con algún
+  tramo reconciliado y otro no (v0.5.7, migración 0018): el total y lo real,
+  «trayecto est. −31,7 kWh (11,0 reales)»; «est.» mientras quede algún tramo
+  estimado.
 - El campo de lectura usa como texto de ejemplo «0–100», nunca un número.
 
 ## 6. Navegación, cabecera y avisos
@@ -146,6 +149,13 @@ Maquetas 01a, 01b, 01c.
   Energía necesaria); debajo, a la izquierda, panel Batería y «Próximos 7
   días»; a la derecha, banner, «Anotar lectura» y «Últimos eventos» (5).
   Móvil: banner, Batería, Coche/Necesita, Anotar lectura, próximos 3 días.
+- Estado del coche (v0.5.7), de los cambios de estado del conector
+  (`cargador_estado`; no de `localtime` del cargador, viaris-api.md):
+  «Conectado · desde ayer 18:00 · sin cargar desde 06:00 · evsm 4» (tras una
+  carga en esta conexión) o «Conectado · desde 18:00 · evsm 4 · sin carga»;
+  mientras carga, sin «conectado desde»: «Cargando · desde 02:00 · evsm 6 ·
+  4,6 kW», desde el inicio de la carga (las pausas 6→5→6 no lo cortan).
+  Conectado desde: primer estado no libre tras el último 1–2.
 - La etiqueta del nivel sale de `v_bateria_estado.confianza` (sección 8):
 
 | confianza | Etiqueta | Texto bajo el nivel |
