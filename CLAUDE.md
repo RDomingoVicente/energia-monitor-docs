@@ -42,8 +42,10 @@ Antes de cualquier cambio, leer:
   Paso 4 hecho (solo JSON): `grafana/energia-bateria.json` y casa · fuera en
   «Energía: coche»; pendiente importarlo y la aceptación en el NAS.
   v0.5.7: migración 0018 (trayecto partido en los eventos: total y parte
-  real) y estado del coche (conectado/cargando/sin cargar desde). La
-  etapa 3 no se empieza hasta nuevo aviso.
+  real) y estado del coche (conectado/cargando/sin cargar desde). Paso 4
+  aceptado en el NAS el 16/11/2026. v0.5.8: migración 0019 (cargas con la
+  energía medida y la estimada a batería). La etapa 3 no se empieza hasta
+  nuevo aviso; después, calibración con Datadis (docs/fase2.md).
 
 ## Estructura
 
@@ -77,7 +79,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0019).
+  migración nueva (la siguiente es la 0020).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de

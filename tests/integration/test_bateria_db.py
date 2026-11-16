@@ -985,3 +985,28 @@ def test_trayecto_sin_tramos_reconciliados_sin_parte_real(conn: psycopg.Connecti
     recalcular_con(conn, Constructor().estado(t(-10), 4).lectura(t(6), 80).trayecto(t(8), t(10)), t(12))
     valor, estimado, real = evento_trayecto(conn)
     assert estimado and real is None and valor < 0
+
+
+# --- Energía medida en los eventos de carga (0019) -----------------------------------------------
+
+
+def test_eventos_de_carga_con_energia_medida(conn: psycopg.Connection, limpio: None) -> None:
+    e, ahora = ESCENARIOS["externa_con_kwh"]()
+    cargar(conn, e)
+    conn.execute("INSERT INTO cargador_sesion (conector, id, inicio, fin, energia_wh, origen_inicio, origen_fin, linea)"
+                 " VALUES ('mennekes', 1, %s, %s, 18259, 'schedman', 'schedman', 'test')",
+                 (ahora - timedelta(hours=40), ahora - timedelta(hours=36)))
+    conn.execute("SELECT recalcular_bateria(%s)", (ahora,))
+    filas = {f[0]: f[1:] for f in conn.execute(
+        "SELECT tipo, valor, medido_kwh FROM v_bateria_evento_reciente WHERE tipo IN ('carga', 'carga_externa')")}
+    factor = conn.execute("SELECT factor FROM bateria_sesion").fetchone()[0]  # type: ignore[index]
+    # Medida: lo que marca el cargador; valor: lo estimado a batería (× factor).
+    assert filas["carga"] == (D("18.259") * factor, D("18.259"))
+    assert filas["carga_externa"][1] == D(30) and cerca(filas["carga_externa"][0], D("25.8"), "1e-9")
+    sin_medida = conn.execute("SELECT count(*) FROM v_bateria_evento_reciente WHERE tipo NOT IN ('carga',"
+                              " 'carga_externa') AND medido_kwh IS NOT NULL").fetchone()[0]  # type: ignore[index]
+    assert sin_medida == 0
+    conn.execute("UPDATE bateria_carga_externa SET kwh = NULL")
+    conn.execute("SELECT recalcular_bateria(%s)", (ahora,))
+    assert conn.execute("SELECT valor, medido_kwh FROM v_bateria_evento_reciente WHERE tipo = 'carga_externa'"
+                        ).fetchone() == (None, None)

@@ -118,8 +118,13 @@ falta energía; marca ámbar en la reserva y blanca en el objetivo.
   «+11 pts de margen (≈10 kWh)». 1 pt = `capacidad_util_kwh` / 100.
 - kWh con un decimal; porcentajes enteros; pts enteros salvo medias (1 decimal).
 - Etiquetas de estado del nivel: `LEÍDO`, `LEÍDO + CARGA`, `ESTIMADO`.
-- Eventos: «lectura 52 %», «conexión», «trayecto est. −9,2 kWh», «carga +19,3
-  kWh», «inicio carga (en curso)». Trayecto partido por una lectura con algún
+- Eventos: «lectura 52 %», «conexión», «trayecto est. −9,2 kWh», «carga 18,3
+  kWh (15,3 a batería)», «carga externa 30,0 kWh (25,8 a batería)» o «carga
+  externa sin kWh», «inicio carga (en curso)». En las cargas, primero la
+  energía medida por el cargador y entre paréntesis la estimada a batería (×
+  `factor_bateria`; v0.5.8, migración 0019). Donde solo cuenta lo que llega a
+  la batería (panel Batería, casilla LEÍDO + CARGA): «carga +19,3 kWh a
+  batería». Trayecto partido por una lectura con algún
   tramo reconciliado y otro no (v0.5.7, migración 0018): el total y lo real,
   «trayecto est. −31,7 kWh (11,0 reales)»; «est.» mientras quede algún tramo
   estimado.

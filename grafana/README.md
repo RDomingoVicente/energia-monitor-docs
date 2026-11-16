@@ -144,7 +144,7 @@ datos por SQL, `bateria recalcular` (docs/parametros.md).
 | Objetivo de salida | % y kWh: reserva + consumo previsto (o el mínimo de la excepción), recortado al tope |
 | Energía necesaria | kWh y pts que faltan para el objetivo |
 | Avisos activos | Los del formulario, por nivel (error, aviso, info) |
-| Nivel de batería (7 días) | Nivel estimado (reconciliado) y previsto (discontinua), lecturas como puntos, reserva y tope. Anotaciones: cargas en casa y trayectos como regiones (inicio y fin); cargas externas y cargas completas como puntos |
+| Nivel de batería (7 días) | Nivel estimado (reconciliado) y previsto (discontinua), lecturas como puntos, reserva y tope. Anotaciones: cargas en casa («18,3 kWh (15,3 a batería)»: medida y estimada a batería) y trayectos como regiones (inicio y fin); cargas externas y cargas completas como puntos |
 | Acierto de la estimación (30 días) | Error medio con signo y error absoluto medio (pts y kWh) de las lecturas comparables, como en la página Historial |
 | Estimado frente a leído (7 días) | Leído − estimado en cada lectura comparable, en pts |
 | Próximas salidas (7 días) | Salidas con origen, consumo previsto, objetivo y energía necesaria (la primera) |

@@ -252,3 +252,8 @@ def test_euros_por_kwh_sin_mezclar_casa_y_fuera(titulo: str) -> None:
 
 def test_frente_al_pvpc_solo_casa() -> None:
     assert "v_coste_carga_externa" not in _sql(PANELES["Frente al PVPC"])
+
+
+def test_cargas_en_casa_con_energia_medida_y_a_bateria() -> None:
+    sql = next(a for a in BATERIA["annotations"]["list"] if a["name"] == "Cargas en casa")["target"]["rawSql"]
+    assert "s.energia_wh / 1000," in sql and "a batería)" in sql and "a la batería" not in sql

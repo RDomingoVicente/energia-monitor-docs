@@ -44,7 +44,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "-- Región: inicio y fin de la sesión.\nSELECT s.inicio AS time, s.fin AS timeend,\n       'Carga en casa: +' || replace(to_char(s.energia_wh / 1000 * s.factor, 'FM999990.0'), '.', ',') || ' kWh a la batería' AS text,\n       'sesion' AS tags\nFROM bateria_sesion s\nWHERE s.inicio < $__timeTo() AND s.fin > $__timeFrom()\nORDER BY 1"
+          "rawSql": "-- Región: inicio y fin de la sesión.\nSELECT s.inicio AS time, s.fin AS timeend,\n       -- Primero la energía medida por el cargador y, entre paréntesis, la estimada a batería (× factor).\n       'Carga en casa: ' || replace(to_char(s.energia_wh / 1000, 'FM999990.0'), '.', ',') || ' kWh ('\n         || replace(to_char(s.energia_wh / 1000 * s.factor, 'FM999990.0'), '.', ',') || ' a batería)' AS text,\n       'sesion' AS tags\nFROM bateria_sesion s\nWHERE s.inicio < $__timeTo() AND s.fin > $__timeFrom()\nORDER BY 1"
         }
       },
       {

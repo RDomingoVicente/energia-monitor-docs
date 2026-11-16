@@ -632,3 +632,16 @@ def test_inicio_trayecto_partido_por_la_primera_lectura(conn: psycopg.Connection
     total = conn.execute("SELECT consumo_kwh FROM bateria_trayecto").fetchone()[0]  # type: ignore[index]
     tx = texto(app_rw(nombre_bd, t(18)).manejar(Peticion("GET", "/", CAB)).cuerpo)
     assert f"trayecto est. −{str(round(total, 1)).replace('.', ',')} kWh (11,0 reales)" in tx
+
+
+def test_inicio_cargas_con_energia_medida(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
+    ahora = escenario(conn, "externa_con_kwh")
+    conn.execute("INSERT INTO cargador_sesion (conector, id, inicio, fin, energia_wh, origen_inicio, origen_fin, linea)"
+                 " VALUES ('mennekes', 1, %s, %s, 18259, 'schedman', 'schedman', 'test')",
+                 (ahora - timedelta(minutes=50), ahora - timedelta(minutes=10)))  # tras la llegada: entre los 5
+    conn.execute("SELECT recalcular_bateria(%s)", (ahora,))
+    t = texto(app_rw(nombre_bd, ahora).manejar(Peticion("GET", "/", CAB)).cuerpo)
+    factor = conn.execute("SELECT factor FROM bateria_sesion").fetchone()[0]  # type: ignore[index]
+    bateria = str(round(D("18.259") * factor, 1)).replace(".", ",")
+    assert f"carga 18,3 kWh ({bateria} a batería)" in t
+    assert "carga externa 30,0 kWh (25,8 a batería)" in t

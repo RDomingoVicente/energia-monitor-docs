@@ -52,7 +52,7 @@ def _texto_bateria(d: Inicio) -> tuple[str, str]:
         return (f"{tipo} {f.corta(e['ultimo_absoluto'])}",
                 f"Último valor absoluto: {tipo} el {f.dia(e['ultimo_absoluto'])} a las "
                 f"{f.hora(e['ultimo_absoluto'])}. {_frase_objetivo(d)}")
-    despues = [f"carga {f.kwh(cargados, signo=True)}"] if cargados > 0 else []
+    despues = [f"carga {f.kwh(cargados, signo=True)} a batería"] if cargados > 0 else []
     if n:
         trayectos = f"{n} trayecto{'s' if n != 1 else ''} estimado{'s' if n != 1 else ''}"
         consumo = f.kwh(-(e["kwh_trayectos_desde_lectura"] or 0))
@@ -62,7 +62,7 @@ def _texto_bateria(d: Inicio) -> tuple[str, str]:
     if despues:
         frase += " Después: " + " y ".join(despues) + "."
     if e["confianza"] == "leido_carga":
-        corto = f"{f.entero(lec)} % leído {f.corta(ts)} {f.kwh(cargados, signo=True)}"
+        corto = f"{f.entero(lec)} % leído {f.corta(ts)} {f.kwh(cargados, signo=True)} a batería"
     elif cargados > 0:
         base = lec + cargados / cap * CIEN
         corto = f"{f.entero(min(base, CIEN))} % tras carga {f.MENOS} {n} trayecto{'s' if n != 1 else ''}"
@@ -216,10 +216,15 @@ def _form(d: Inicio, form: FormLectura) -> Html:
 def _evento(ev) -> tuple[str, str]:  # type: ignore[no-untyped-def]
     if ev.tipo == "lectura":
         return f"lectura {f.pct(ev.valor)}", "azul"
+    # Cargas: primero la energía medida por el cargador y, entre paréntesis, la estimada a batería (0019).
     if ev.tipo == "carga":
-        return f"carga {f.kwh(ev.valor, signo=True)}", "verde"
+        if ev.medido is None:
+            return f"carga {f.kwh(ev.valor, signo=True)} a batería", "verde"
+        return f"carga {f.kwh(ev.medido)} ({f.numero(ev.valor)} a batería)", "verde"
     if ev.tipo == "carga_externa":
-        return ("carga externa " + (f.kwh(ev.valor, signo=True) if ev.valor is not None else "sin kWh")), "verde"
+        if ev.medido is None:
+            return "carga externa sin kWh", "verde"
+        return f"carga externa {f.kwh(ev.medido)} ({f.numero(ev.valor)} a batería)", "verde"
     if ev.tipo == "trayecto":
         # Partido por una lectura con parte reconciliada: el total y lo real (0018).
         real = (f" ({f.numero(-ev.real)} reales)" if ev.estimado and ev.real is not None and ev.valor is not None

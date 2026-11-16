@@ -254,6 +254,14 @@ Entrega:
      tests (el caso del NAS, trayecto reconciliado entero, tramo en
      intervalo incoherente, secuencia de estados con la pausa 5).
      Pendiente: desplegar en el NAS.
+   - v0.5.8 (migración 0019): en «Últimos eventos», las cargas mostraban la
+     energía a batería sin decirlo. Ahora primero la medida y entre
+     paréntesis la estimada a batería: «carga 18,3 kWh (15,3 a batería)» y
+     «carga externa 30,0 kWh (25,8 a batería)» (sin kWh, «carga externa sin
+     kWh»), con `medido_kwh` en `v_bateria_evento_reciente`. El panel
+     Batería y la casilla LEÍDO + CARGA dicen «+19,3 kWh a batería». Igual en
+     la anotación «Cargas en casa» de Grafana. Pendiente: desplegar en el
+     NAS.
 4. Dashboard de batería (E2.10, segunda parte), sin migraciones ni imagen:
    `grafana/energia-bateria.json` (`uid` `energia-bateria`, el del enlace
    del formulario) con nivel ahora, próxima salida, objetivo, energía
@@ -265,8 +273,10 @@ Entrega:
    de cada uno aparte. Verificado con tests: cada consulta como
    `grafana_ro` contra un historial con lectura, carga, trayecto y carga
    externa, y las cifras frente a la página Historial y las vistas.
-   Pendiente: importar en el NAS y comprobar la navegación entre los tres
-   dashboards.
+   Importado en el NAS y aceptado el 16/11/2026: navegación entre los tres
+   dashboards con el desplegable «Energía» (en batería, los botones sueltos
+   no cabían junto a los interruptores de las anotaciones), regiones de
+   cargas y trayectos, colores de la confianza y casa · fuera.
 
 ### Objetivo
 
@@ -639,6 +649,18 @@ Métrica de resultado: ahorro frente a cargar al enchufar a potencia máxima.
 3. Cómo reacciona a una franja creada, modificada o borrada durante una carga.
 4. Franja de respaldo: una recurrente siempre activa garantiza carga si el NAS
    falla, pero impide saltarse días caros. Decisión abierta.
+
+## Después de la etapa 3
+
+Tareas anotadas para cuando termine la etapa 3; sin código hasta entonces.
+
+- Calibración con Datadis: descarga diaria por API de la curva horaria del
+  CUPS (credenciales en .env) y ajuste lineal (ganancia y desplazamiento) de
+  la pinza de la casa y del contador del cargador. Datos del 15/11: con carga
+  (~4,4 kW) la pinza marca −1 % frente a i-DE; sin carga marca ~+150 W (día:
+  33,0 frente a 31,0 kWh, +6,6 %); el contador del cargador marca ~+5–6 %
+  (22,33 kWh del coche frente a 22,13 kWh de toda la casa en 03:00–08:00).
+  Revisar el factor del contador con esos datos.
 
 ## Fuera del alcance de la fase 2
 

@@ -171,7 +171,7 @@ def test_casilla_nivel_leido_mas_carga() -> None:
                      estado_conector=6)
     html = inicio.pantalla(d)
     t = texto(html)
-    assert "LEÍDO + CARGA 73 %" in t and "52 % leído 16/11 18:42 +19,3 kWh" in t
+    assert "LEÍDO + CARGA 73 %" in t and "52 % leído 16/11 18:42 +19,3 kWh a batería" in t
     assert "cubierto" in t and "+14 pts de margen (≈13 kWh)" in t
     assert 'class="seg cargado x-52 w-21"' in html  # verde de la lectura (52) al nivel (73)
 
@@ -183,7 +183,7 @@ def test_casilla_nivel_estimado() -> None:
     d.origen_trayectos = {"estimado"}
     t = texto(inicio.pantalla(d))
     assert "ESTIMADO 38 %" in t and "73 % tras carga − 2 trayectos" in t
-    assert "Después: carga +19,3 kWh y 2 trayectos estimados (−29,2 kWh, mediana)." in t
+    assert "Después: carga +19,3 kWh a batería y 2 trayectos estimados (−29,2 kWh, mediana)." in t
     assert "objetivo 59 % · faltan 21 pts" in t
 
 
@@ -221,6 +221,16 @@ def test_trayecto_partido_muestra_el_total_y_lo_real() -> None:
     assert "trayecto est. −31,7 kWh (11,0 reales)" in t
     assert "trayecto −11,2 kWh" in t and "11,2 reales" not in t  # reconciliado entero: sin paréntesis
     assert "trayecto est. −9,2 kWh" in t and "−9,2 kWh (" not in t
+
+
+def test_cargas_con_energia_medida_y_a_bateria() -> None:
+    d = datos_inicio()
+    d.eventos = [Evento(AHORA - timedelta(hours=1), "carga", D("15.33756"), False, None, D("18.259")),
+                 Evento(AHORA - timedelta(hours=2), "carga_externa", D("25.8"), False, None, D(30)),
+                 Evento(AHORA - timedelta(hours=3), "carga_externa", None, False, None, None)]
+    t = texto(inicio.pantalla(d))
+    assert "carga 18,3 kWh (15,3 a batería)" in t
+    assert "carga externa 30,0 kWh (25,8 a batería)" in t and "carga externa sin kWh" in t
 
 
 def test_banner_de_lectura_desde_los_datos() -> None:

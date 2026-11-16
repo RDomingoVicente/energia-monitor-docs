@@ -205,6 +205,8 @@ def test_trayecto_partido_reales_menor_que_el_consumo(nombre_bd: str, conn: psyc
 def test_anotaciones(ro: psycopg.Connection) -> None:
     _, sesiones = filas(ro, ANOTACIONES["Cargas en casa"]["target"]["rawSql"])
     assert [(s[0], s[1]) for s in sesiones] == [(t(2), t(4))]
+    # Primero la energía medida y entre paréntesis la estimada a batería (20 kWh × 0,86).
+    assert sesiones[0][2] == "Carga en casa: 20,0 kWh (17,2 a batería)"
     _, trayectos = filas(ro, ANOTACIONES["Trayectos"]["target"]["rawSql"])
     assert [(x[0], x[1]) for x in trayectos] == [(t(6), t(12))] and trayectos[0][2].startswith("Trayecto: −")
     _, puntos = filas(ro, ANOTACIONES["Cargas externas y carga completa"]["target"]["rawSql"])

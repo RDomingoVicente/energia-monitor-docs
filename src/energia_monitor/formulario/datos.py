@@ -63,6 +63,7 @@ class Evento:
     valor: Decimal | None
     estimado: bool
     real: Decimal | None = None  # trayecto: parte reconciliada (negativa); igual a valor si lo está entero (0018)
+    medido: Decimal | None = None  # cargas: energía medida por el cargador; valor es la estimada a batería (0019)
 
 
 @dataclass(frozen=True)
@@ -187,7 +188,8 @@ def inicio(conn: psycopg.Connection, ahora: datetime) -> Inicio:
         dias.append(Dia(d, salida, texto, clase, previsto, objetivo_pct))
 
     eventos = [Evento(*f) for f in conn.execute(
-        "SELECT instante, tipo, valor, estimado, real_kwh FROM v_bateria_evento_reciente WHERE instante <= %s"
+        "SELECT instante, tipo, valor, estimado, real_kwh, medido_kwh FROM v_bateria_evento_reciente"
+        " WHERE instante <= %s"
         " ORDER BY instante DESC, CASE tipo WHEN 'conexion' THEN 0 ELSE 1 END LIMIT 5", (ahora,))]
 
     conexion = Conexion(*conn.execute(_SQL_CONEXION, {"a": ahora}).fetchone())  # type: ignore[misc]
