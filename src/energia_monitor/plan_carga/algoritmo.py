@@ -315,7 +315,7 @@ class _Planificador:
                 break
             g = cortas[0]
             # Los cuartos nuevos llevan el nivel de mayor prioridad de la franja y su salida.
-            nivel = min((self.elegidos[q] for q in self._cuartos_de(*g)), key=lambda x: PRIORIDAD[x.nivel])
+            nivel = self._principal(*g)
             alargar = self._alargar(g, nivel)
             if nivel.nivel in OPCIONALES:
                 # Margen u oportunista: se alarga si hay cuartos que cumplen su nivel; si no, se descarta.
@@ -360,6 +360,11 @@ class _Planificador:
                 return
             del self.elegidos[max(quitables, key=lambda q: (self.cuartos[q].precio or CERO, q))]
 
+    def _principal(self, inicio: datetime, fin: datetime) -> _Eleccion:
+        """Nivel de mayor prioridad de una franja (con la salida más temprana entre los de ese nivel)."""
+        return min((self.elegidos[q] for q in self._cuartos_de(inicio, fin)),
+                   key=lambda x: (PRIORIDAD[x.nivel], x.salida or datetime.max.replace(tzinfo=inicio.tzinfo)))
+
     def techo(self, nivel: str) -> Decimal:
         return min(self.p.nivel_oportunista_kwh, self.p.tope_kwh) if nivel == "oportunista" else self.p.tope_kwh
 
@@ -389,14 +394,19 @@ class _Planificador:
             for (inicio_a, fin_a), (inicio_b, fin_b) in zip(grupos, grupos[1:], strict=False):
                 qs = self._cuartos_de(fin_a, inicio_b)
                 ahorra = fr.num_tareas(inicio_a, fin_b) < fr.num_tareas(inicio_a, fin_a) + fr.num_tareas(inicio_b, fin_b)
-                vecino = self.elegidos[fin_a - CUARTO]
-                if ahorra and all(q in self.candidatos and self._admite(q, vecino) for q in qs):
+                if not ahorra or not all(q in self.candidatos for q in qs):
+                    continue
+                # El hueco toma el nivel principal de una de sus vecinas (primero el de más prioridad) y
+                # cumple sus reglas.
+                for x in sorted((self._principal(inicio_a, fin_a), self._principal(inicio_b, fin_b)),
+                                key=lambda x: PRIORIDAD[x.nivel]):
                     coste = self._coste(qs)
-                    if coste is not None:
-                        huecos.append((coste, fin_a, qs))
+                    if coste is not None and all(self._admite(q, x) for q in qs):
+                        huecos.append((coste, fin_a, qs, x))
+                        break
             cerrado = False
-            for _, fin_a, qs in sorted(huecos, key=lambda h: (h[0], h[1])):
-                if self._aplicar(qs, self.elegidos[fin_a - CUARTO]):
+            for _, _, qs, x in sorted(huecos, key=lambda h: (h[0], h[1])):
+                if self._aplicar(qs, x):
                     cerrado = True
                     break
             if cerrado:
