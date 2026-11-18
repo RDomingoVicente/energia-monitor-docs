@@ -1206,6 +1206,14 @@ Plan aceptado con estas decisiones del usuario:
   `planificador_tarea`) sin escribir. Solo se crea si no hay ninguna tarea
   igual (31/12 00:00, 1 min); si la hay en otro id, aviso
   `guardiana_en_otro_id` y no se toca nada.
+- Simulación en seco (v0.7.1): el plan de sombra no respeta las tareas de
+  la app (decisión del paso 3a), así que lo que se audita en seco es lo que
+  se escribiría en activo **con las tareas de la app desactivadas**, que es
+  como se va a activar. Cada operación que choca con una tarea activa de la
+  app lo lleva en el motivo («· choca con la tarea 6 de la app»), y el CLI
+  `reconciliar --en-seco` lo indica en la cabecera y en cada línea. Decidido
+  el 18/11/2026, al ver en el NAS la franja del 19/11 de 00:00 a 06:45 encima
+  de la tarea 6 (`choca_con` = {6}).
 - `limpiar --confirmar` borra solo las tareas registradas en
   `planificador_tarea` como franja propia que siguen en el cargador tal como
   se escribieron. Nunca la guardiana, las ajenas ni una propia cambiada

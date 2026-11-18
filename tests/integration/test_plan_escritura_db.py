@@ -127,6 +127,22 @@ def test_sombra_solo_en_seco(conn: psycopg.Connection, limpio: None, cargador: C
     assert conn.execute("SELECT id_tarea, papel FROM planificador_tarea").fetchall() == [(9, "guardiana")]
 
 
+def test_en_seco_anota_choques_con_la_app(conn: psycopg.Connection, limpio: None, cargador: CargadorHTTP) -> None:
+    """Sombra con la tarea 6 activa encima del plan: la auditoría en seco lo anota y no se escribe nada."""
+    escenario(conn, local(17, 20))
+    escritura.leer(conn, cliente(cargador), local(17, 20))
+    cargador.tareas[6]["active"] = 1  # miércoles 00:00–08:00
+    plan_guardado(conn, local(17, 20))
+    r = escritura.reconciliar_y_escribir(conn, cliente(cargador), local(17, 20))
+    assert r.en_seco and cargador.escrituras() == []
+    motivos = [m for (m,) in conn.execute("SELECT motivo FROM plan_auditoria WHERE en_seco ORDER BY id")]
+    assert any(m.endswith("choca con la tarea 6 de la app") for m in motivos), motivos
+    lineas = plan_cli.en_seco(conn, cliente(cargador), local(17, 20))
+    assert lineas[0].startswith("En seco (modo sombra): lo que escribiría en activo con tus tareas de la app "
+                                "desactivadas")
+    assert any("choca con la tarea 6 de la app" in x for x in lineas[1:])
+
+
 def test_pendiente_antes_del_post_y_fallo(conn: psycopg.Connection, limpio: None, cargador: CargadorHTTP) -> None:
     escenario(conn)
     activo(conn)

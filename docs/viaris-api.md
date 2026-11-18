@@ -278,9 +278,52 @@ Cada escritura queda en `plan_auditoria` (cuerpo, resultado, respuesta).
 En sombra no se escribe: se lee el programador y se registra en la
 auditoría, con `en_seco`, lo que se habría escrito.
 
-Sin verificar contra el cargador real (pruebas a mano antes de activar):
-`POST` sobre un id ya ocupado (¿sobrescribe o da error?) y el `PUT` con la
-tarea completa tal como la devuelve la lectura.
+Verificado el 18/11/2026 (prueba 1, a mano): el `POST` mínimo que genera el
+código, con fecha e inactivo,
+
+```json
+{"tasks":[{"id":10,"active":0,"user":"","group":0,"priority":1,
+  "initTime":{"day":524288,"month":1024,"weekday":0,
+              "timeList":[{"hourMin":180,"duration":30}]}}]}
+```
+
+queda guardado con la fecha intacta (`day` y `month` de un bit, `weekday`
+0). El cargador completa el resto (`type` 0, `maxPower` -1,
+`solarPriority`, `minCurrent`, `validFrom`, `validTo`, `chargeRelated` y, en
+la franja, `maxPower` y `phases` a 0) y calcula `_initLocaltime` y
+`_endLocaltime` (1795140000 y 1795141800: 20/11/2026 de 03:00 a 03:30 hora
+de Madrid). La respuesta del `POST` es un **objeto**, no la lista que
+devuelve el GET; el código no la interpreta (la guarda en la auditoría y
+confirma con un GET). **La app e-VIARIS muestra una tarea con fecha como
+«todos los días»**: es solo cómo la muestra. No hay que editarla desde la
+app, que la convertiría en semanal.
+
+La respuesta del `POST` es el objeto `data` del conector: claves `uid`,
+`cfg` y `stat`.
+
+Verificado el 18/11/2026 (prueba 2, a mano): **un `POST` sobre un id ya
+ocupado sobrescribe la tarea sin avisar.** La tarea 10 pasó de 03:00 a
+03:30 y las demás no cambiaron. Por eso el código solo hace POST sobre ids
+que no están ni en la última lectura ni registrados como propios, con esa
+lectura hecha justo antes y bajo `pg_advisory_lock`. Una tarea creada desde
+la app en ese mismo id, entre esa lectura y el POST, se perdería; la
+ventana es de segundos.
+
+Verificado el 18/11/2026 (prueba 3, a mano): el `PUT` que genera el código
+(`reconciliar.cuerpo` con la tarea leída como base y sin los campos `_`)
+mueve la tarea 10 a las 04:00 con 45 min. La fecha y el resto de campos no
+cambian, y el cargador recalcula `_initLocaltime` y `_endLocaltime`
+(1795143600 y 1795146300: 20/11/2026 de 04:00 a 04:45 hora de Madrid).
+
+Verificado el 18/11/2026 (prueba 4, a mano): el `DELETE` del código
+(`{"tasks":[{"id":10}]}`) borra la tarea con fecha. El programador queda
+idéntico a la copia tomada antes de la prueba 1 (comparado sin los campos
+`_`).
+
+Con las pruebas 1 a 4 quedan verificadas contra el cargador real las tres
+escrituras tal como las genera el código. Sigue sin verificar el
+comportamiento de una tarea propia **activa** escrita por el planificador
+con el coche conectado: se verá en la primera noche en activo.
 
 ## Rutas que el código no debe usar
 

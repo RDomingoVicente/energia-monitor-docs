@@ -197,11 +197,16 @@ docs/fase2.md.
    ```
 
    Ninguna operación sobre 5, 6 ni 9; cada franja del plan, una tarea (dos si
-   cruza la medianoche) en ids libres. En sombra nada queda escrito, así que
+   cruza la medianoche) en ids libres. Mientras tengas tareas de la app
+   activas, las franjas que caigan encima llevan en el motivo «choca con la
+   tarea N de la app» (v0.7.1): es lo esperado en sombra. En sombra nada queda escrito, así que
    cada plan nuevo repite los POST de sus franjas: es lo esperado.
 3. Pruebas de escritura a mano (skill `viaris`), una a una y en horario
    barato, incluido un POST sobre un id ocupado y un PUT con la tarea
-   completa.
+   completa. **Hechas el 18/11/2026** (pruebas 1 a 4 en
+   docs/viaris-api.md): POST con fecha, POST sobre un id ocupado (sobrescribe
+   sin avisar), PUT del código y DELETE; el programador quedó como al
+   empezar.
 4. No antes del 25/11/2026: revisar `v_plan_ahorro` de la semana en sombra.
    Después, desactivar en la app las tareas 5 y 6 (sin borrarlas).
 5. Activar de día (Plan de carga o `planificador modo activo`) y vigilar la

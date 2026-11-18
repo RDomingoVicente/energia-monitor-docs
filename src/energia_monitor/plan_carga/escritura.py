@@ -20,6 +20,7 @@ from psycopg.types.json import Jsonb
 
 from energia_monitor.plan_carga.modelo import Ocupado
 from energia_monitor.plan_carga.reconciliar import (
+    anotar_choques,
     Aviso,
     Deseada,
     Operacion,
@@ -221,7 +222,12 @@ def reconciliar_y_escribir(conn: psycopg.Connection, cliente: ClienteViaris, aho
         if not en_seco:
             if r.olvidar:
                 conn.execute("DELETE FROM planificador_tarea WHERE id_tarea = ANY(%s)", (list(r.olvidar),))
-        hechas, fallo = escribir(conn, cliente, ahora, r.operaciones, en_seco, accion_id)
+        operaciones = r.operaciones
+        if en_seco:
+            # El plan de sombra no respeta las tareas de la app: en la auditoría se anota con cuáles chocaría.
+            operaciones = anotar_choques(operaciones, lectura, (p.id for p in propias(conn)),
+                                         guardiana_id(conn, ahora))
+        hechas, fallo = escribir(conn, cliente, ahora, operaciones, en_seco, accion_id)
         avisos = list(r.avisos)
         if fallo:
             avisos.append(Aviso("escritura_fallida", "aviso", "Escritura fallida en el cargador", fallo,
@@ -231,7 +237,7 @@ def reconciliar_y_escribir(conn: psycopg.Connection, cliente: ClienteViaris, aho
             log.warning("planificador: %s", fallo)
         elif hechas:
             log.info("planificador: %d escritura(s) confirmadas en el cargador", hechas)
-        return Resultado(True, en_seco, hechas, fallo, tuple(avisos), r.operaciones)
+        return Resultado(True, en_seco, hechas, fallo, tuple(avisos), operaciones)
     finally:
         conn.execute("SELECT pg_advisory_unlock(%s)", (LOCK_CARGADOR,))
 

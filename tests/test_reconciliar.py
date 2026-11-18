@@ -16,6 +16,7 @@ import pytest
 
 from energia_monitor.plan_carga.reconciliar import (
     Deseada,
+    anotar_choques,
     Operacion,
     Propia,
     cuerpo,
@@ -160,6 +161,18 @@ def test_adopta_la_guardiana_sin_escribir_en_ninguna_tarea_existente() -> None:
     r = reconciliar(AHORA, "activo", 9, leer(), [], plan((local(18, 23), local(19, 2))), CONGELAR)
     assert [(p.id, p.papel, p.fecha) for p in r.adoptar] == [(9, "guardiana", date(2026, 12, 31))]
     assert not {o.id for o in r.operaciones} & {5, 6, 9} and all(o.metodo == "POST" for o in r.operaciones)
+
+
+def test_en_seco_se_anotan_los_choques_con_la_app() -> None:
+    """La tarea 6 (miércoles 00:00–08:00) activa: la tarea del miércoles 25 a la 01:00 choca; la del jueves no."""
+    lectura = [t if t.id != 6 else Tarea(6, True, t.tipo, t.weekday, t.day, t.month, t.hour_min, t.duracion,
+                                          {**t.datos, "active": 1}) for t in leer()]
+    r = reconciliar(AHORA, "activo", 9, lectura, [], plan((local(25, 1), local(25, 3)), (local(26, 1), local(26, 3))),
+                    CONGELAR)
+    ops = anotar_choques(r.operaciones, lectura, [], 9)
+    assert [o.motivo for o in ops] == ["nueva franja · choca con la tarea 6 de la app", "nueva franja"]
+    # Con la 6 inactiva (la lectura real), nada que anotar.
+    assert [o.motivo for o in anotar_choques(r.operaciones, leer(), [], 9)] == ["nueva franja", "nueva franja"]
 
 
 def test_terminadas_se_borran_y_las_caducadas_avisan() -> None:

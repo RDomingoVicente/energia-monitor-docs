@@ -17,8 +17,8 @@ import psycopg
 
 from energia_monitor import parametros
 from energia_monitor.plan_carga import acciones, escritura
-from energia_monitor.plan_carga.reconciliar import GUARDIANA, Operacion, Propia, _coincide, cuerpo, es_guardiana, \
-    fecha_guardiana, reconciliar
+from energia_monitor.plan_carga.reconciliar import GUARDIANA, Operacion, Propia, _coincide, anotar_choques, cuerpo, \
+    es_guardiana, fecha_guardiana, reconciliar
 from energia_monitor.tiempo import MADRID
 from energia_monitor.viaris import ClienteViaris, Tarea
 
@@ -74,10 +74,18 @@ def en_seco(conn: psycopg.Connection, cliente: ClienteViaris, ahora: datetime) -
         return ["No se pudo leer el programador del cargador."]
     modo_ = conn.execute("SELECT planificador_modo_en(%s)", (ahora,)).fetchone()[0]  # type: ignore[index]
     congelar = timedelta(minutes=int(escritura._param(conn, "congelar_franja_min", ahora)))
-    r = reconciliar(ahora, "activo" if modo_ == "sombra" else modo_, escritura.guardiana_id(conn, ahora), leidas,
-                    escritura.propias(conn), escritura.deseadas_actuales(conn, ahora), congelar)
-    lineas = [f"En seco (modo {modo_}; en sombra, lo que haría en activo): {len(r.operaciones)} escritura(s)."]
-    for op in r.operaciones:
+    gid = escritura.guardiana_id(conn, ahora)
+    propias = escritura.propias(conn)
+    r = reconciliar(ahora, "activo" if modo_ == "sombra" else modo_, gid, leidas, propias,
+                    escritura.deseadas_actuales(conn, ahora), congelar)
+    operaciones = anotar_choques(r.operaciones, leidas, (p.id for p in propias), gid)
+    if modo_ == "sombra":
+        cabecera = (f"En seco (modo sombra): lo que escribiría en activo con tus tareas de la app desactivadas: "
+                    f"{len(operaciones)} escritura(s).")
+    else:
+        cabecera = f"En seco (modo {modo_}): {len(operaciones)} escritura(s)."
+    lineas = [cabecera]
+    for op in operaciones:
         t = op.cuerpo["tasks"][0]
         detalle = ""
         if "initTime" in t:

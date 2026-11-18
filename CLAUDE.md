@@ -56,7 +56,7 @@ Antes de cualquier cambio, leer:
   (v0.6.1, migración 0021): Plan de carga, Próximas cargas en Inicio,
   Parámetros por grupos, Ayuda y navegación, solo lectura (maquetas 01d,
   01a–01c y 05), desplegado el 18/11/2026. Paso 3c (v0.7.0, migración
-  0022): escritura y reconciliación (`plan_carga/escritura.py`,
+  0022; v0.7.1, choques con la app anotados en seco): escritura y reconciliación (`plan_carga/escritura.py`,
   `reconciliar.py`, `acciones.py`), cola `plan_accion` con NOTIFY al muestreo,
   acciones en Plan de carga y CLI `planificador modo|tareas|reconciliar
   --en-seco|limpiar|guardiana` (en el contenedor `muestreo`); en sombra

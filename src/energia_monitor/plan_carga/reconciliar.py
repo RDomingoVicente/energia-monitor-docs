@@ -314,3 +314,29 @@ def reconciliar(ahora: datetime, modo: str, guardiana_id: int, lectura: Sequence
 
     return Reconciliacion(tuple(ops + borrar + cambiar + altas), tuple(avisos), tuple(adoptar), tuple(olvidar),
                           libres)
+
+
+def choques_ajenas(op: Operacion, lectura: Sequence[Tarea], propios: Iterable[int], guardiana_id: int) -> list[int]:
+    """Ids de las tareas activas de la app (ni propias ni la guardiana) que se solapan con la tarea que deja esta
+    operación activa. En sombra el plan no las respeta (decisión del paso 3a); en seco se anotan."""
+    if op.registro is None or not op.registro.activa:
+        return []
+    excluir = set(propios) | {guardiana_id, op.id}
+    a, b = op.registro.inicio, op.registro.fin
+    return sorted({t.id for t in lectura if t.activa and t.id not in excluir
+                   for x, y in ocurrencias(t, a - timedelta(days=1), b + timedelta(days=1)) if fr.solapa(x, y, a, b)})
+
+
+def anotar_choques(ops: Sequence[Operacion], lectura: Sequence[Tarea], propios: Iterable[int],
+                   guardiana_id: int) -> tuple[Operacion, ...]:
+    """Añade «· choca con la tarea N de la app» al motivo de las operaciones que chocan (solo en seco)."""
+    propios = set(propios)
+    salida = []
+    for op in ops:
+        ids = choques_ajenas(op, lectura, propios, guardiana_id)
+        if ids:
+            texto = ", ".join(map(str, ids))
+            op = replace(op, motivo=f"{op.motivo} · choca con la{'s' if len(ids) > 1 else ''} "
+                                    f"tarea{'s' if len(ids) > 1 else ''} {texto} de la app")
+        salida.append(op)
+    return tuple(salida)
