@@ -275,3 +275,21 @@ Fuera de `bateria_parametro`:
   ```sql
   UPDATE planificador_config SET fuente = 'omie';
   ```
+
+Recálculo del plan: el muestreo recalcula cada 15 minutos, en cada cambio
+de estado del conector o sesión nueva, y cuando hay una solicitud. La piden
+`bateria_servicio.recalcular` (lecturas, excepciones, horario, cargas
+externas y parámetros, desde el formulario o el CLI) y el refresco de
+`mv_precio_final`. Tras cambiar por SQL algo que use el plan, basta con:
+
+```sql
+SELECT solicitar_plan('cambio por SQL');
+```
+
+Ver el plan sin guardarlo, o el que se habría calculado al enchufar un día
+pasado con su coste frente al real y a cargar al enchufar:
+
+```sh
+docker compose exec collector python -m energia_monitor planificador plan
+docker compose exec collector python -m energia_monitor planificador simular --dia 2026-11-17
+```

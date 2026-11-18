@@ -632,8 +632,19 @@ Entre 3b y 3c, al menos una semana en sombra revisando el plan y el ahorro.
    minutos). La 0020 no se aplica en el NAS hasta cerrar 3a (v0.6.0);
    mientras, se puede corregir. Verificado con tests (ahorro SQL frente
    a Python en la noche del cambio de hora y en 12 casos aleatorios).
-   Pendiente: algoritmo, servicio, ciclo en el muestreo, CLI y solicitudes de
-   recálculo.
+   Segunda entrega: algoritmo y franjas como funciones puras
+   (`plan_carga/`), con búsqueda exhaustiva e invariantes aleatorios.
+   Tercera entrega: servicio (`plan_carga/servicio.py`: entrada desde la
+   base de datos, plan guardado), ciclo al final de cada ciclo del muestreo
+   (cada 15 minutos, en cada cambio de estado o sesión nueva y con cada
+   solicitud; un fallo queda en `planificador_ciclo` y el evento se
+   reintenta), solicitudes de recálculo (`bateria_servicio.recalcular`, es
+   decir, lecturas, excepciones, horario, cargas externas y parámetros, y
+   `db.refrescar_precio_final`, precios nuevos) y CLI `planificador plan` y
+   `planificador simular`. Medido en local: lectura de la entrada 0,12 s y
+   algoritmo 0,03 s con 72 h de horizonte y 3 salidas; 0,15 s en un caso de
+   estrés de 288 cuartos disponibles. Pendiente: `simular` con los datos
+   reales (volcado de producción) y la aceptación en el NAS.
 
 ### Objetivo
 

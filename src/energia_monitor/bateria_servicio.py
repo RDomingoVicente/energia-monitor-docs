@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import psycopg
 
+from energia_monitor.plan_carga import servicio as plan_servicio
 from energia_monitor.tiempo import MADRID
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,9 @@ def recalcular(conn: psycopg.Connection, ahora: datetime | None = None) -> int:
         fila = conn.execute("SELECT recalcular_bateria(%s)", (ahora,)).fetchone()
     assert fila is not None
     actualizar_avisos(conn, ahora)
+    # Lectura, excepción, horario, carga externa o parámetro: el planificador recalcula en el ciclo
+    # siguiente del muestreo (etapa 3). El propio muestreo también pasa por aquí; su ciclo ya planifica.
+    plan_servicio.solicitar_sin_fallar(conn, "cambio en la batería")
     return int(fila[0])
 
 

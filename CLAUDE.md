@@ -75,6 +75,11 @@ Antes de cualquier cambio, leer:
   docker build -f tests/ui/Dockerfile --target test-ui .
 - Capturas junto a las maquetas:
   docker build -f tests/ui/Dockerfile --target capturas --output type=local,dest=capturas .
+- Tanda larga del planificador (8000 casos aleatorios, fuera de la CI):
+  PLAN_LENTO=1 pytest -m lento tests/test_plan_carga.py
+- Planificador (sombra, no escribe en el cargador):
+  python -m energia_monitor planificador plan [--instante "AAAA-MM-DD HH:MM"]
+  python -m energia_monitor planificador simular --dia AAAA-MM-DD [--desde HH:MM]
 
 ## Convenciones
 

@@ -126,6 +126,8 @@ def refrescar_precio_final(conn: psycopg.Connection) -> Refresco:
     fila = conn.execute(SQL_FILAS_PRECIO_FINAL).fetchone()
     assert fila is not None
     refresco = Refresco(int(fila[0]), int(fila[1]), segundos)
+    # Precios nuevos o corregidos: el planificador (muestreo) recalcula en el ciclo siguiente (0020).
+    conn.execute("SELECT solicitar_plan('precios')")
     if refresco.completo:
         log.info("mv_precio_final refrescada en %.1f s: %d filas (esperadas %d)",
                  segundos, refresco.filas, refresco.esperadas)

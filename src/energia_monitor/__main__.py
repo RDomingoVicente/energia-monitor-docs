@@ -1,4 +1,5 @@
-"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | refrescar | parametro | esios | cargador | bateria].
+"""Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | refrescar | parametro | esios | cargador | bateria
+| planificador].
 
 - ejecutar (por defecto): migraciones, descarga de los días que falten desde
   CARGA_INICIAL_DESDE hasta mañana y actualización diaria planificada.
@@ -38,6 +39,11 @@
   certificados en FORMULARIO_CERTIFICADOS) y healthcheck del contenedor.
 - bateria carga-externa [--kwh N] [--coste EUR] [--instante "AAAA-MM-DD HH:MM"]
   [--nota TEXTO]: carga fuera de casa (con el coche desconectado) y recálculo.
+- planificador plan [--instante "AAAA-MM-DD HH:MM"]: calcula el plan de carga
+  (hora de Madrid; por defecto, ahora) y lo muestra, sin guardarlo.
+- planificador simular --dia AAAA-MM-DD [--desde HH:MM]: plan calculado al
+  enchufar ese día (o a esa hora) y su coste frente al real y a cargar al
+  enchufar en esa conexión. No guarda nada ni toca el cargador.
 
 recargar, esios recargar, esios estimar y parametro registrar (de contrato)
 refrescan mv_precio_final al terminar.
@@ -140,6 +146,14 @@ def _parser() -> argparse.ArgumentParser:
     externa.add_argument("--coste", type=Decimal, help="coste en € (opcional)")
     externa.add_argument("--instante", help="AAAA-MM-DD HH:MM, hora de Madrid (por defecto, ahora)")
     externa.add_argument("--nota")
+
+    plan = sub.add_parser("planificador", help="planificador de carga (paso 3a: sombra, sin escribir en el cargador)")
+    sub_plan = plan.add_subparsers(dest="accion", required=True)
+    calcular = sub_plan.add_parser("plan", help="calcula el plan y lo muestra (no lo guarda)")
+    calcular.add_argument("--instante", help="AAAA-MM-DD HH:MM, hora de Madrid (por defecto, ahora)")
+    simular = sub_plan.add_parser("simular", help="plan al enchufar un día pasado y su coste frente al real")
+    simular.add_argument("--dia", type=date.fromisoformat, required=True)
+    simular.add_argument("--desde", help="HH:MM local; por defecto, el primer enchufe del día desde las 12:00")
     return parser
 
 
@@ -327,6 +341,29 @@ def _parametro(args: argparse.Namespace) -> int:
         return 0 if _refrescar(conn) else 1
 
 
+def _planificador(args: argparse.Namespace) -> int:
+    from energia_monitor.plan_carga import informe
+    from energia_monitor.plan_carga import servicio as plan_servicio
+
+    with db.conectar() as conn:
+        if args.accion == "plan":
+            try:
+                ahora = (bateria_servicio.instante_local(args.instante).instante if args.instante
+                         else datetime.now(UTC))
+            except bateria_servicio.ErrorLectura as e:
+                log.error("%s", e)
+                return 1
+            entrada, ctx, plan, ms = plan_servicio.calcular(conn, ahora)
+            print("\n".join(informe.lineas_plan(entrada, ctx, plan, ms)))
+            return 0
+        instante = plan_servicio.instante_de_simulacion(conn, args.dia, args.desde)
+        if instante is None:
+            log.error("no hay ningún enchufe el %s desde las 12:00; indica la hora con --desde", args.dia)
+            return 1
+        print("\n".join(informe.lineas_simulacion(plan_servicio.simular(conn, instante))))
+        return 0
+
+
 def _formulario(args: argparse.Namespace) -> int:
     from energia_monitor.formulario import config as config_formulario
 
@@ -387,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if orden == "formulario":
         return _formulario(args)
+    if orden == "planificador":
+        return _planificador(args)
 
     if orden == "migrar":
         with db.conectar() as conn:

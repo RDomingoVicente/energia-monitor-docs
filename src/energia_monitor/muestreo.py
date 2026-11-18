@@ -19,6 +19,7 @@ from decimal import Decimal
 import psycopg
 
 from energia_monitor import bateria_servicio, db
+from energia_monitor.plan_carga.servicio import Ciclo as CicloPlan
 from energia_monitor.tiempo import MADRID, limites_dia_utc
 from energia_monitor.viaris import CONECTOR, ClienteViaris, ErrorCargador, EstadoConector, Modulador, Sesion
 
@@ -188,6 +189,8 @@ class Muestreador:
     cliente: ClienteViaris
     reloj: Callable[[], datetime] = lambda: datetime.now(UTC)
     ultimo_historico: datetime | None = None
+    # Planificador de carga en sombra (etapa 3, paso 3a): al final de cada ciclo. None: sin planificador.
+    plan: CicloPlan | None = None
 
     def __post_init__(self) -> None:
         self._aviso_modulador = _AvisoFallos("modulador")
@@ -210,21 +213,27 @@ class Muestreador:
             self._aviso_modulador.fallo(e)
         else:
             guardar_muestra(conn, instante, modulador, estado.estado if estado else None)
+        evento = None
         if estado is not None and registrar_estado(conn, instante, estado):
             # Un cambio de estado puede abrir o cerrar un trayecto (E2.4).
             bateria_servicio.recalcular_sin_fallar(conn, "cambio de estado del conector")
+            evento = f"estado {estado.estado}"
         if self.ultimo_historico is None or instante - self.ultimo_historico >= INTERVALO_HISTORICO:
-            self.leer_historico(conn, instante)
+            if self.leer_historico(conn, instante):
+                evento = evento or "sesiones del histórico"
         # Avisos (0016): «Cargador no accesible», «Sin lecturas»... se abren y cierran en aviso_historial
         # aunque no cambie nada más.
         bateria_servicio.actualizar_avisos_sin_fallar(conn)
+        if self.plan is not None:
+            self.plan.ejecutar(conn, instante, evento)
 
-    def leer_historico(self, conn: psycopg.Connection, instante: datetime) -> None:
+    def leer_historico(self, conn: psycopg.Connection, instante: datetime) -> bool:
+        """Lee y guarda el histórico; True si hay sesiones nuevas o modificadas."""
         try:
             sesiones = self.cliente.historico()
         except ErrorCargador as e:
             self._aviso_historico.fallo(e)
-            return
+            return False
         self._aviso_historico.exito()
         nuevas, modificadas = guardar_sesiones(conn, sesiones)
         self.ultimo_historico = instante
@@ -232,9 +241,11 @@ class Muestreador:
             log.info("histórico del cargador: %d sesión(es) nuevas y %d modificadas de %d leídas",
                      nuevas, modificadas, len(sesiones))
             bateria_servicio.recalcular_sin_fallar(conn, "sesiones nuevas o modificadas")
-        elif hay_sesiones_pendientes(conn):
+            return True
+        if hay_sesiones_pendientes(conn):
             # Sesión recién terminada: la regla de carga completa (E2.3) espera 180 s.
             bateria_servicio.recalcular_sin_fallar(conn, "sesión pendiente de clasificar")
+        return False
 
 
 def ejecutar(
@@ -253,7 +264,7 @@ def ejecutar(
         log.info("migraciones aplicadas: %s", ", ".join(aplicadas) if aplicadas else "ninguna pendiente")
         bateria_servicio.recalcular_sin_fallar(conn, "arranque del muestreo")
     log.info("muestreo del cargador en %s cada %d s", cliente.base, INTERVALO_S)
-    muestreador = Muestreador(cliente, reloj)
+    muestreador = Muestreador(cliente, reloj, plan=CicloPlan())
     while not stop.is_set():
         inicio = reloj()
         try:
