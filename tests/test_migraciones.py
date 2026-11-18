@@ -34,6 +34,7 @@ PUBLICADAS = {
     "0018_evento_trayecto_partido.sql": "b6ee2147588392b4561a6ae5946a3431f08e06e9b18c1b0326d1d9659f0823ab",
     "0019_evento_carga_medida.sql": "1b8e52468253dd25cd075702f47ec328667746a5feb617d34c460ba974fb907c",
     "0020_planificador.sql": "930e0e80fa0cf980a5ea5ac270c06df060d42c6c58952db3519126eb69b86979",
+    "0021_plan_pantalla.sql": "7b5e4c2161af1a0b5d1e86897f82685d57305877921ccc77f1bd76b105b3db42",
 }
 
 

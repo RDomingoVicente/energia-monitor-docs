@@ -25,7 +25,7 @@ TLS = RAIZ / "tests" / "fixtures" / "tls"
 MAQUETAS = RAIZ / "docs" / "maquetas"
 PUERTO = 18444
 # (prefijo de la maqueta, ruta en la implementación)
-PANTALLAS = [("01a-inicio-leido", "/"), ("02-excepciones", "/excepciones"), ("03-horario", "/horario"),
+PANTALLAS = [("01a-inicio-leido", "/"), ("01d-plan-de-carga", "/plan"), ("02-excepciones", "/excepciones"), ("03-horario", "/horario"),
              ("04-historial", "/historial"), ("05-parametros", "/parametros"), ("06-ayuda", "/ayuda"),
              ("07-avisos", "/avisos"), ("08-carga-externa", "/carga-externa")]
 TAMANOS = {"escritorio": (1280, 900), "movil": (390, 844)}

@@ -9,6 +9,8 @@ from decimal import Decimal as D
 from typing import Any
 
 from energia_monitor.formulario import datos as d
+from energia_monitor.formulario import plan_datos as pd
+from energia_monitor.tiempo import MADRID
 
 AHORA = datetime(2026, 11, 16, 18, 52, tzinfo=UTC)  # lun 16/11 19:52 en Madrid
 NOTA_LARGA = "Viaje a Zaragoza por la autovía con parada larga en el área de servicio"
@@ -182,12 +184,90 @@ def parametros(_conn: object, _ahora: object) -> d.Parametros:
                             "Valor inicial estimado.",
                             "Se calibra con lecturas antes y después de cargar, sin trayectos entre ellas. No afecta al "
                             "coste: se paga lo que mide el cargador.", D(str(v)), "usuario", date(2025, 1, 1), i,
-                            grupo_de[c], c != "id_tarea_guardiana")
+                            grupo_de[c], c != "id_tarea_guardiana", NOTAS.get(c))
                 for i, (c, (n, u, mi, ma, v)) in enumerate(textos.items(), 1)]
+    grupos_ = [d.Grupo(1, "Coche y batería", "¿Cómo es el coche?", False, True),
+               d.Grupo(2, "Estimación del nivel", "¿Cómo se calcula el % sin lecturas?", False, False),
+               d.Grupo(3, "Previsión de consumo", "¿Cuánto voy a gastar?", False, False),
+               d.Grupo(4, "Estrategia de carga", "¿Cuánto cargar y a qué precio?", False, True),
+               d.Grupo(5, "Disponibilidad del coche", "¿Cuándo estará enchufado?", False, False),
+               d.Grupo(6, "Cargador y franjas", "¿Cómo se escribe en el cargador?", True, False),
+               d.Grupo(7, "Avisos y vigilancia", "¿Cuándo me avisa?", False, False)]
+    notas = {"umbral_oportunista_pct": "de la media de 7 días · hoy 0,211 €/kWh",
+             "historial_min_disponibilidad_dias": "historial actual: 4 días → modo prudente",
+             "max_tareas_sistema": "+ guardiana = 8; 2 huecos para la app"}
     cambios = [d.Cambio(20, "consumo_inicial_trayecto_kwh", date(2026, 11, 13), D(25), None,
                         "indicado por el usuario al revisar el consumo de la semana"),
-               d.Cambio(19, "desconexion_min_s", date(2026, 11, 13), D(1200), D(1800), "formulario")]
-    return d.Parametros(AHORA, vigentes, cambios, d.Calibracion(D("0.84"), D("0.86"), 5, D("0.81"), D("0.87")))
+               d.Cambio(19, "desconexion_min_s", date(2026, 11, 13), D(1200), D(1800), "formulario"),
+               d.Cambio(18, "carga_oportunista", date(2025, 1, 1), D(1), None, "Especificación de la etapa 3 (E3.9)", 14)]
+    return d.Parametros(AHORA, vigentes, cambios, d.Calibracion(D("0.84"), D("0.86"), 5, D("0.81"), D("0.87")),
+                        grupos_, notas)
+
+
+NOTAS = {"observaciones_calibracion": "cargas necesarias para sugerir la eficiencia",
+         "margen_carga_pct": "sobre la energía necesaria; solo bajo el umbral",
+         "ventana_umbral_dias": "días completos para la media del umbral",
+         "nivel_oportunista_pct": "nunca por encima del tope",
+         "ventana_precio_esperado_dias": "para los cuartos sin precio publicado",
+         "potencia_carga_inicial_kw": "solo sin sesiones medidas", "ventana_potencia_dias": "mediana por hora local",
+         "horizonte_plan_h": "o hasta la última salida conocida",
+         "hora_publicacion_precios": "precios de D+1 publicados desde esta hora de D",
+         "aviso_planificador_min": "correo desde el NAS"}
+
+
+# --- Plan de carga (maqueta 01d): franja en curso, otra provisional y una fuera de la vista ---------------------
+
+def _franjas() -> list[pd.FranjaPlan]:
+    madrid = AHORA.astimezone(MADRID)
+    hoy = madrid.replace(hour=0, minute=0, second=0, microsecond=0)
+    salida = (hoy + timedelta(days=1, hours=9, minutes=30)).astimezone(UTC)
+    curso = pd.FranjaPlan((hoy + timedelta(hours=17)).astimezone(UTC), (hoy + timedelta(hours=23)).astimezone(UTC),
+                          D("27.0"), False, 1, True, D("0.154"), D("4.86"),
+                          (("necesaria", salida, D("7.4")), ("margen", salida, D("0.7")), ("oportunista", None, D("18.9"))),
+                          "en su horario · coche cargando", D("12.4"))
+    noche = pd.FranjaPlan((hoy + timedelta(days=1, hours=23)).astimezone(UTC),
+                          (hoy + timedelta(days=2, hours=2, minutes=30)).astimezone(UTC), D("15.8"), True, 2, False,
+                          D("0.231"), D("4.09"), (("necesaria", salida + timedelta(days=1), D("15.8")),), "programada")
+    lejos = pd.FranjaPlan((hoy + timedelta(days=2, hours=14)).astimezone(UTC),
+                          (hoy + timedelta(days=2, hours=15)).astimezone(UTC), D("4.5"), True, 1, False, D("0.190"),
+                          D("0.86"), (("oportunista", None, D("4.5")),), "programada")
+    return [curso, noche, lejos]
+
+
+def _linea(desde: datetime, horas: int, franjas: list[pd.FranjaPlan], salidas: list[datetime]) -> pd.Linea:
+    precios_ = [D("0.31"), D("0.30"), D("0.29"), D("0.22"), D("0.16"), D("0.13"), D("0.15"), D("0.24"), D("0.38"),
+                D("0.44"), D("0.39"), D("0.33"), D("0.32"), D("0.35"), D("0.41"), D("0.33"), D("0.27"), D("0.25"),
+                D("0.23"), D("0.30"), D("0.52"), D("0.58"), D("0.49"), D("0.37")]
+    horas_ = [pd.Hora(desde + timedelta(hours=k), precios_[k % 24], k >= horas - 14) for k in range(horas)]
+    hasta = desde + timedelta(hours=horas)
+    coche = [(desde, min(salidas[0], hasta), "enchufado"),
+             (min(salidas[0] + timedelta(hours=9), hasta), min(salidas[0] + timedelta(hours=23), hasta), "probable")]
+    return pd.Linea(desde, hasta, AHORA, D("0.211"), horas_, [f for f in franjas if f.inicio < hasta and f.fin > desde],
+                    [c for c in coche if c[0] < c[1]], [s for s in salidas if desde <= s < hasta],
+                    [f for f in franjas if f.inicio >= hasta])
+
+
+def plan_carga(_conn: object, _ahora: object) -> pd.PlanCarga:
+    franjas = _franjas()
+    salidas = [pd.SalidaPlan(franjas[0].desglose[0][1], D("53.9"), True),  # type: ignore[arg-type]
+               pd.SalidaPlan(franjas[1].desglose[0][1], D("53.9"), True)]  # type: ignore[arg-type]
+    hoy = AHORA.astimezone(MADRID).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+    hora = AHORA.replace(minute=0, second=0, microsecond=0)
+    instantes = [s.instante for s in salidas]
+    pasadas = [pd.FranjaPasada(AHORA - timedelta(days=1, hours=16), AHORA - timedelta(days=1, hours=12), True, D("18.0"),
+                               (("necesaria", D("6.0")), ("oportunista", D("12.0"))), D("17.6"), D("2.71"), True),
+               pd.FranjaPasada(AHORA - timedelta(days=2, hours=15), AHORA - timedelta(days=2, hours=13), True, D("9.0"),
+                               (("oportunista", D("9.0")),), D("0"), None, False)]
+    ahorro = [pd.Ahorro("hoy", 1, D("1.86"), D("1.52"), D("0.10"), D("3.10"), 0),
+              pd.Ahorro("7 días", 5, D("14.20"), D("11.95"), D("0.80"), D("22.40"), 0),
+              pd.Ahorro("30 días", 5, D("14.20"), D("11.95"), D("0.80"), D("22.40"), 0)]
+    return pd.PlanCarga(AHORA, "sombra", AHORA - timedelta(minutes=4), True, True, D("91.3"), D("0.86"), D("50.2"),
+                        D("71.5"), D("0.211"), D(60), 7, D(80), 7, franjas[-1].fin, salidas, franjas, pasadas, ahorro,
+                        _linea(hoy, 60, franjas, instantes), _linea(hora, 24, franjas, instantes))
+
+
+def proximas_cargas(_conn: object, _ahora: object, n: int = 3) -> tuple[str, list[pd.FranjaPlan]]:
+    return "sombra", _franjas()[:n]
 
 
 def parametro_registrado(_conn: object, _id: int) -> tuple[str, D, date, str] | None:
@@ -216,4 +296,6 @@ def instalar(monkeypatch: Any) -> None:
                    "cargas_externas", "carga_externa", "horario", "parametros", "parametro_registrado", "avisos"):
         monkeypatch.setattr(d, nombre, globals()[nombre])
     monkeypatch.setattr(d, "version_bd", lambda _conn: "9999")
+    monkeypatch.setattr(pd, "plan_carga", plan_carga)
+    monkeypatch.setattr(pd, "proximas_cargas", proximas_cargas)
     monkeypatch.setattr(d, "lectura_guardada", lambda _conn, _id: None)

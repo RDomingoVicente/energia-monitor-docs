@@ -17,6 +17,9 @@ def _svg(trazos: str, tam: int = 18, color: str = "currentColor") -> Html:
 ICONOS = {
     "inicio": '<rect x="2" y="7" width="18" height="10" rx="2"></rect><path d="M22 11v2"></path>'
               '<path d="M6 10v4"></path><path d="M10 10v4"></path>',
+    # Enchufe (maqueta 01d): Plan de carga.
+    "plan": '<path d="M9 2v6"></path><path d="M15 2v6"></path><path d="M6 8h12v4a6 6 0 0 1-12 0z"></path>'
+            '<path d="M12 18v4"></path>',
     "excepciones": '<rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"></path>'
                    '<path d="M8 2v4"></path><path d="M3 10h18"></path>',
     "horario": '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
@@ -36,12 +39,12 @@ ICONOS = {
               'a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path>',
 }
 
-PANTALLAS = [("inicio", "/", "Inicio"), ("excepciones", "/excepciones", "Excepciones"),
+PANTALLAS = [("inicio", "/", "Inicio"), ("plan", "/plan", "Plan de carga"), ("excepciones", "/excepciones", "Excepciones"),
              ("horario", "/horario", "Horario"), ("historial", "/historial", "Historial"),
              ("parametros", "/parametros", "Parámetros"), ("avisos", "/avisos", "Avisos")]
-NAV_MOVIL = [("inicio", "/", "Inicio"), ("excepciones", "/excepciones", "Excepciones"),
-             ("horario", "/horario", "Horario"), ("historial", "/historial", "Historial"),
-             ("parametros", "/parametros", "Ajustes")]
+# Móvil (etapa 3): Historial sale de la barra; se llega desde Inicio y desde «Últimas franjas» de Plan.
+NAV_MOVIL = [("inicio", "/", "Inicio"), ("plan", "/plan", "Plan"), ("excepciones", "/excepciones", "Excepciones"),
+             ("horario", "/horario", "Horario"), ("parametros", "/parametros", "Ajustes")]
 
 
 # Logo BYD de Arcticons (CC BY-SA 4.0), el mismo dibujo que estatico/favicon.svg. viewBox recortado al trazo.

@@ -648,8 +648,23 @@ Entre 3b y 3c, al menos una semana en sombra revisando el plan y el ahorro.
    `planificador simular`. Probado con un volcado de producción
    restaurado en local (noches del 14 al 18/11). Medido en local: lectura de la entrada 0,12 s y
    algoritmo 0,03 s con 72 h de horizonte y 3 salidas; 0,15 s en un caso de
-   estrés de 288 cuartos disponibles. Pendiente: `simular` con los datos
-   reales (volcado de producción) y la aceptación en el NAS.
+   estrés de 288 cuartos disponibles.
+3. Paso 3b (v0.6.1, migración 0021), solo lectura: pantalla Plan de carga
+   (`/plan`, 7.9 de formulario-maquetas.md) con panel de control, línea de
+   tiempo de 60 h (24 h desplazable en móvil), franjas con su desglose por
+   nivel y estados de sombra, últimas franjas de 7 días y ahorro (hoy, 7 y
+   30 días, con la columna «Plan» en sombra); «Próximas cargas» en Inicio
+   (con `SOMBRA`) y «Historial de lecturas →» en móvil; Parámetros rehecha
+   por grupos (índice, grupo 6 plegado, calibración en el grupo 1, «solo
+   CLI», notas de una línea); Ayuda con Parámetros por grupos y la sección
+   «Plan de carga»; navegación nueva. Las acciones que escriben aparecen
+   desactivadas con «disponible en el paso 3c». La 0021 añade
+   `plan_ahorro(desde, hasta)` (con la conexión abierta; `v_plan_ahorro`
+   pasa a usarla), `plan_franjas_pasadas(desde, hasta)` y
+   `bateria_parametro_clave.nota`. Verificado con tests (pantallas contra
+   PostgreSQL con `formulario_rw`, `/plan` por debajo de 300 ms) y con
+   Playwright en 1280×900 y 390×844. Pendiente: desplegar y la semana en
+   sombra antes de 3c.
 
 ### Objetivo
 

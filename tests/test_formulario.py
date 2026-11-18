@@ -261,9 +261,9 @@ def test_bloques_de_escritorio_y_movil() -> None:
     orden = [html.index(x) for x in ("Nivel</p>", "Estado del coche", "Próxima salida", "Energía necesaria",
                                       "Próximos 7 días", "Anotar lectura", "Últimos eventos")]
     assert orden == sorted(orden)
-    # Móvil: orden con orden-N (banner, batería, coche y necesita, lectura, próximos días).
-    for clase in ("bateria-movil solo-movil orden-2", "coche-necesita solo-movil orden-3", "pn orden-4",
-                  "solo-movil orden-5"):
+    # Móvil: orden con orden-N (banner, batería, coche y necesita, próximas cargas, lectura, próximos días).
+    for clase in ("bateria-movil solo-movil orden-2", "coche-necesita solo-movil orden-3", "proximas-cargas orden-4",
+                  "pn orden-5", "solo-movil orden-6"):
         assert clase in html
     assert "style=" not in html  # la CSP no admite estilos en línea
     assert not re.search(r"https?://", html)
@@ -286,3 +286,19 @@ def test_servicio_formulario_en_el_compose() -> None:
     assert "PGUSER: formulario_rw" in bloque
     assert '["CMD", "python", "-m", "energia_monitor", "formulario", "salud"]' in bloque
     assert "funnel" not in bloque.lower().replace("nunca con tailscale funnel", "")
+
+
+def test_ultimos_cambios_agrupan_las_altas_en_bloque() -> None:
+    """Como en la 0020: 14 claves con una fuente y 5 con otra, todas sin valor anterior y desde el 1/1/2025."""
+    from datetime import date as fecha
+
+    from energia_monitor.formulario.datos import Cambio, _cambios_agrupados
+
+    desde = fecha(2025, 1, 1)
+    filas = [Cambio(200, "reserva_pct", fecha(2026, 11, 20), D(30), D(25), "formulario")]
+    filas += [Cambio(150 - i, f"plan_{i}", desde, D(1), None, "Plan del paso 3a") for i in range(5)]
+    filas += [Cambio(145 - i, f"e39_{i}", desde, D(1), None, "Especificación de la etapa 3 (E3.9)") for i in range(14)]
+    filas += [Cambio(50 - i, f"viejo_{i}", fecha(2026, 11, 1 + i), D(i), D(0), "x") for i in range(10)]
+    agrupados = _cambios_agrupados(filas)
+    assert [(c.clave, c.n) for c in agrupados] == [("reserva_pct", 1), ("plan_0", 5), ("e39_0", 14), ("viejo_0", 1),
+                                                    ("viejo_1", 1)]

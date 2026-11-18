@@ -1,4 +1,6 @@
-"""Parámetros (formulario-maquetas.md, 7.5; maqueta 05). Mismas reglas que el CLI; en la página, desde hoy."""
+"""Parámetros (formulario-maquetas.md, 7.5; maqueta 05, rehecha por grupos en la etapa 3). Mismas reglas que el
+CLI; en la página, desde hoy. Grupos, orden, nombres, rangos y notas salen de la base de datos (E3.9), sin listas
+fijas en el código."""
 
 from __future__ import annotations
 
@@ -7,7 +9,7 @@ from decimal import Decimal
 
 from energia_monitor.formulario import formato as f
 from energia_monitor.parametros import UNIDAD_HORA, hora_de_minutos, valor_de_texto
-from energia_monitor.formulario.datos import Parametro, Parametros
+from energia_monitor.formulario.datos import Grupo, Parametro, Parametros
 from energia_monitor.formulario.html import Html, h, unir
 
 ORIGENES = {"ficha_tecnica": "ficha técnica", "usuario": "usuario", "estimado": "estimado", "contrato": "contrato",
@@ -51,6 +53,10 @@ def valor(clave: str, unidad: str, v: Decimal) -> str:
 def rango(p: Parametro) -> str:
     if p.unidad == "s":
         return f"{'0' if p.minimo == 0 else _segundos(p.minimo)}–{_segundos(p.maximo)}"
+    if p.unidad == "min":
+        return f"{'0' if p.minimo == 0 else _segundos(p.minimo * 60)}–{_segundos(p.maximo * 60)}"
+    if p.unidad == "h":
+        return f"{_num(p.minimo)}–{_num(p.maximo)} h"
     if p.unidad == "sí/no":
         return "sí / no"
     if p.unidad == UNIDAD_HORA:
@@ -89,70 +95,141 @@ class FormParametro:
     errores: dict[str, str] = field(default_factory=dict)
 
 
-def _tabla(d: Parametros) -> Html:
-    filas, items = [], []
-    for p in d.vigentes:
-        v = valor(p.clave, p.unidad, p.valor)
-        origen = ORIGENES.get(p.origen, p.origen)
-        desde = f"{p.desde:%d/%m/%Y}"
-        # Las claves no editables (id_tarea_guardiana) se muestran sin enlace: solo se cambian por CLI.
-        cambiar = (h('<a href="/parametros?clave={}#cambiar" class="lk">Cambiar</a>', p.clave) if p.editable
-                   else h('<span class="k m">solo CLI</span>'))
-        filas.append(h('<tr><td><p class="nombre">{}</p><p class="k m">{}</p></td><td class="r m">{}</td>'
-                       '<td class="r m">{}</td><td><span class="tag horario">{}</span></td><td class="m">{}</td>'
-                       '<td class="r">{}</td></tr>',
-                       p.nombre, p.clave, v, rango(p), origen, desde, cambiar))
-        contenido = h('<div><p class="nombre">{}</p><p class="k m">{}</p></div><div class="r"><p class="m">{}</p>'
-                      '<p class="k m">{} · {}</p></div>', p.nombre, p.clave, v, origen, desde)
+ANCLAS = {1: "g-coche", 2: "g-nivel", 3: "g-consumo", 4: "g-estrategia", 5: "g-disponibilidad", 6: "g-cargador",
+          7: "g-avisos"}
+
+
+def _ancla(g: Grupo) -> str:
+    return ANCLAS.get(g.grupo, f"g-{g.grupo}")
+
+
+def _nota(d: Parametros, p: Parametro) -> str | None:
+    return d.notas.get(p.clave, p.nota)
+
+
+def _cambiar(p: Parametro) -> Html:
+    # Las claves no editables (id_tarea_guardiana) se muestran sin enlace: solo se cambian por CLI.
+    return (h('<a href="/parametros?clave={}#cambiar" class="lk">Cambiar</a>', p.clave) if p.editable
+            else Html('<span class="k m">solo CLI</span>'))
+
+
+def _calibracion(d: Parametros, movil: bool) -> Html:
+    """«Calibración sugerida», dentro del grupo 1 bajo la eficiencia de carga. No se aplica sola."""
+    c = d.calibracion
+    if c.sugerido is None:
+        texto = Html('<p class="k texto">Aún no hay observaciones: hacen falta dos lecturas con solo una carga entre '
+                     'ellas (sin trayectos) y al menos la energía mínima para calibrar.</p>')
+        boton = Html("")
+    else:
+        sugerido = c.sugerido.quantize(Decimal("0.01"))
+        rango_txt = f" · rango {f.numero(c.minimo, 2)}–{f.numero(c.maximo, 2)}" if c.minimo is not None else ""
+        texto = h('<p class="m calibracion">observado <span class="cifra">{}</span> · vigente {}{}<span class="k">n = {} '
+                  'carga{}{}</span></p><p class="k texto">No se aplica solo: al registrarlo entra en vigor desde hoy y se '
+                  'recalcula la estimación.</p>',
+                  f.numero(sugerido, 2), f.numero(c.vigente, 2), Html("<br>") if movil else Html(" · "),
+                  c.observaciones, "" if c.observaciones == 1 else "s", rango_txt)
+        boton = h('<form action="/parametros" method="post"><input type="hidden" name="clave" value="factor_bateria">'
+                  '<input type="hidden" name="valor" value="{}"><input type="hidden" name="desde" value="{}">'
+                  '<input type="hidden" name="nota" value="calibración sugerida ({} observación{})"><button type="submit" '
+                  'class="{}">Registrar {}{}</button></form>',
+                  f"{sugerido}", f"{f.local(d.ahora):%Y-%m-%d}", c.observaciones,
+                  "" if c.observaciones == 1 else "es", "btn2 azul" if movil else "lk", f.numero(sugerido, 2),
+                  " como valor nuevo" if movil else "")
+    return h('<div class="calibracion-caja"><div class="calibracion-texto"><p class="pt azul">Calibración sugerida</p>{}'
+             '</div>{}</div>', texto, boton)
+
+
+def _fila(d: Parametros, p: Parametro) -> Html:
+    nota = _nota(d, p)
+    return h('<tr><td><p class="nombre">{}</p><p class="k m clave">{}</p>{}</td><td class="r m valor">{}</td>'
+             '<td class="r m tenue">{}</td><td><span class="tag horario">{}</span></td><td class="m tenue" title="{}">{}'
+             '</td><td class="r">{}</td></tr>',
+             p.nombre, p.clave, h('<p class="nota-param">{}</p>', nota) if nota else Html(""),
+             valor(p.clave, p.unidad, p.valor), rango(p), ORIGENES.get(p.origen, p.origen), f"{p.desde:%d/%m/%Y}",
+             f"{p.desde:%d/%m}", _cambiar(p))
+
+
+def _grupo_escritorio(d: Parametros, g: Grupo) -> Html:
+    filas: list[Html] = []
+    for p in (x for x in d.vigentes if x.grupo == g.grupo):
+        filas.append(_fila(d, p))
+        if p.clave == "factor_bateria":
+            filas.append(h('<tr class="fila-calibracion"><td colspan="6">{}</td></tr>', _calibracion(d, movil=False)))
+    tabla = h('<table class="fija parametros-grupo"><colgroup><col><col class="c-valor"><col class="c-rango">'
+              '<col class="c-origen"><col class="c-desde"><col class="c-accion"></colgroup><thead><tr><th>Parámetro</th>'
+              '<th class="r">Valor</th><th class="r">Rango</th><th>Origen</th><th>Desde</th><th class="r"><span '
+              'class="oculto">Acciones</span></th></tr></thead><tbody>{}</tbody></table>', unir(filas))
+    titulo = f"{g.grupo} · {g.nombre}"
+    n = sum(1 for x in d.vigentes if x.grupo == g.grupo)
+    if g.avanzado:
+        # Grupo avanzado: plegado también en escritorio.
+        return h('<details id="{}" class="pn grupo-param"><summary class="ph"><span class="titulo-grupo"><span class="pt">'
+                 '{}</span><span class="tag estimado">avanzado</span></span><span class="k">{} · {} parámetros · '
+                 'desplegar ▾</span></summary><p class="k texto relleno-x">Valores técnicos que casi nunca hay que tocar.'
+                 '</p>{}</details>', _ancla(g), titulo, g.pregunta, n, tabla)
+    return h('<section id="{}" class="pn grupo-param"><div class="ph"><h2 class="pt">{}</h2><span class="k">{}</span>'
+             '</div>{}</section>', _ancla(g), titulo, g.pregunta, tabla)
+
+
+def _grupo_movil(d: Parametros, g: Grupo) -> Html:
+    items: list[Html] = []
+    for p in (x for x in d.vigentes if x.grupo == g.grupo):
+        nota = _nota(d, p)
+        contenido = h('<div class="izq"><p class="nombre">{}</p><p class="k m clave">{}</p>{}</div><div class="r">'
+                      '<p class="m valor">{}</p><p class="k m">{} · {}</p></div>', p.nombre, p.clave,
+                      h('<p class="nota-param">{}</p>', nota) if nota else Html(""), valor(p.clave, p.unidad, p.valor),
+                      ORIGENES.get(p.origen, p.origen), f"{p.desde:%d/%m}")
         items.append(h('<a class="it-parametro" href="/parametros?clave={}#cambiar">{}</a>', p.clave, contenido)
-                     if p.editable else h('<div class="it-parametro">{}</div>', contenido))
-    return h('<section class="pn solo-escritorio"><div class="ph"><h2 class="pt">Parámetros vigentes</h2><span class="k m">'
-             'cada cambio es un registro nuevo con fecha de inicio</span></div><div class="tabla-desplazable"><table>'
-             '<thead><tr><th>Parámetro</th><th class="r">Valor</th><th class="r">Rango</th><th>Origen</th><th>Desde</th>'
-             '<th class="r"><span class="oculto">Acciones</span></th></tr></thead><tbody>{}</tbody></table></div></section>'
-             '<section class="pn solo-movil orden-2"><div class="ph"><h2 class="pt">Vigentes</h2></div>{}</section>',
-             unir(filas), unir(items))
+                     if p.editable else h('<div class="it-parametro">{}<span class="k m solo-cli">solo CLI</span></div>',
+                                          contenido))
+        if p.clave == "factor_bateria":
+            items.append(_calibracion(d, movil=True))
+    n = len([x for x in d.vigentes if x.grupo == g.grupo])
+    avanzado = Html('<span class="tag estimado">avanzado</span>') if g.avanzado else Html("")
+    return h('<details class="pn grupo-param"{}><summary class="ph"><span class="titulo-grupo-movil"><span '
+             'class="titulo-grupo"><span class="pt">{} · {}</span>{}</span><span class="k pregunta">{}</span></span>'
+             '<span class="k m">{}</span></summary><div class="lista-param">{}</div></details>',
+             Html(" open") if g.abierto_movil else Html(""), g.grupo, g.nombre, avanzado, g.pregunta, n, unir(items))
+
+
+def _indice(d: Parametros) -> Html:
+    enlaces = []
+    for g in d.grupos:
+        n = sum(1 for x in d.vigentes if x.grupo == g.grupo)
+        enlaces.append(h('<a href="#{}"><span>{} · {}</span><span class="k m">{}{}</span></a>', _ancla(g), g.grupo,
+                         g.nombre, n, " · avanzado" if g.avanzado else ""))
+    return h('<nav class="pn indice-grupos solo-escritorio" aria-label="Grupos de parámetros"><div class="ph">'
+             '<h2 class="pt">Grupos</h2><span class="k m">{} parámetros</span></div>{}</nav>',
+             len(d.vigentes), unir(enlaces))
 
 
 def _cambios(d: Parametros) -> Html:
     unidades = {p.clave: p.unidad for p in d.vigentes}
     filas = []
     for c in d.cambios:
+        if c.n > 1:
+            filas.append(h('<div class="it"><span>{}</span><span>{} parámetros nuevos</span><span class="nota-celda">{}'
+                           '</span></div>', f"{c.desde:%d/%m/%Y}", c.n, c.nota))
+            continue
         u = unidades.get(c.clave, "")
         anterior = valor(c.clave, u, c.anterior) if c.anterior is not None else "—"
-        filas.append(h('<tr><td>{}</td><td>{}</td><td>{} → {}</td><td class="nota-celda">{}</td></tr>',
+        filas.append(h('<div class="it"><span>{}</span><span>{} {} → {}</span><span class="nota-celda">{}</span></div>',
                        f"{c.desde:%d/%m/%Y}", c.clave, anterior, valor(c.clave, u, c.valor), c.nota))
-    return h('<section class="pn solo-escritorio"><div class="ph"><h2 class="pt">Últimos cambios</h2><span class="k m">'
-             'fecha de inicio de cada valor</span></div><div class="tabla-desplazable"><table><tbody class="m">{}</tbody>'
-             '</table></div></section>', unir(filas))
-
-
-def _calibracion(d: Parametros) -> Html:
-    c = d.calibracion
-    if c.sugerido is None:
-        cuerpo = Html('<p class="k texto">Aún no hay observaciones: hacen falta dos lecturas con solo una carga entre '
-                      'ellas (sin trayectos) y al menos la energía mínima para calibrar.</p>')
-    else:
-        sugerido = c.sugerido.quantize(Decimal("0.01"))
-        rango_txt = f" · rango {f.numero(c.minimo, 2)}–{f.numero(c.maximo, 2)}" if c.minimo is not None else ""
-        cuerpo = h('<p class="m calibracion">observado <span class="azul">{}</span> · vigente {}<br><span class="k">'
-                   'n = {} carga{}{}</span></p><p class="k texto">No se aplica solo. Al registrarlo entra en vigor desde '
-                   'hoy y se recalcula la estimación.</p><form action="/parametros" method="post"><input type="hidden" '
-                   'name="clave" value="factor_bateria"><input type="hidden" name="valor" value="{}"><input type="hidden" '
-                   'name="desde" value="{}"><input type="hidden" name="nota" value="calibración sugerida ({} observación{})">'
-                   '<button type="submit" class="btn2">Registrar {} como valor nuevo</button></form>',
-                   f.numero(sugerido, 2), f.numero(c.vigente, 2), c.observaciones, "" if c.observaciones == 1 else "s",
-                   rango_txt, f"{sugerido}", f"{f.local(d.ahora):%Y-%m-%d}", c.observaciones,
-                   "" if c.observaciones == 1 else "es", f.numero(sugerido, 2))
-    return h('<section class="pn orden-3"><div class="ph"><h2 class="pt">Calibración sugerida</h2><span class="k m">'
-             'factor_bateria</span></div><div class="relleno">{}</div></section>', cuerpo)
+    return h('<section class="pn cambios-param orden-3"><div class="ph"><h2 class="pt">Últimos cambios</h2></div>'
+             '<div class="lista">{}</div></section>', unir(filas))
 
 
 def _formulario(d: Parametros, form: FormParametro) -> Html:
     editables = [p for p in d.vigentes if p.editable]
     elegido = next((p for p in editables if p.clave == form.clave), editables[0])
-    opciones = unir(h('<option value="{}"{}>{} · {}</option>', p.clave,
-                      Html(" selected") if p.clave == elegido.clave else Html(""), p.clave, p.nombre) for p in editables)
+    nombres = {g.grupo: f"{g.grupo} · {g.nombre}" for g in d.grupos}
+    grupos_sel: list[Html] = []
+    for g in sorted({p.grupo for p in editables}):
+        opciones_g = unir(h('<option value="{}"{}>{} · {}</option>', p.clave,
+                            Html(" selected") if p.clave == elegido.clave else Html(""), p.clave, p.nombre)
+                          for p in editables if p.grupo == g)
+        grupos_sel.append(h('<optgroup label="{}">{}</optgroup>', nombres.get(g, str(g)), opciones_g))
+    opciones = unir(grupos_sel)
 
     def error(campo: str) -> tuple[Html, Html]:
         if campo in form.errores:
@@ -170,7 +247,7 @@ def _formulario(d: Parametros, form: FormParametro) -> Html:
               hora_de_minutos(elegido.maximo)) if hora else Html('type="text" inputmode="decimal"'))
     hoy = f"{f.local(d.ahora):%Y-%m-%d}"
     return h(
-        '<form class="pn orden-1" id="cambiar" action="/parametros" method="post"><div class="ph"><h2 class="pt">Cambiar '
+        '<form class="pn orden-2" id="cambiar" action="/parametros" method="post"><div class="ph"><h2 class="pt">Cambiar '
         'un valor</h2></div><div class="relleno"><div class="campo"><label for="p-clave" class="k">Parámetro</label>'
         '<select id="p-clave" name="clave" class="inp"{}>{}</select>{}</div><div class="dos"><div class="campo">'
         '<label for="p-valor" class="k">Valor nuevo ({})</label><input id="p-valor" name="valor" class="inp" {} '
@@ -188,5 +265,9 @@ def _formulario(d: Parametros, form: FormParametro) -> Html:
 
 def pantalla(d: Parametros, form: FormParametro, avisos: list[Html]) -> Html:
     zona = h('<div class="banners orden-0">{}</div>', unir(avisos)) if avisos else Html("")
-    return h('{}<div class="dos-columnas"><div class="col">{}{}</div><div class="col lateral">{}{}</div></div>',
-             zona, _tabla(d), _cambios(d), _calibracion(d), _formulario(d, form))
+    escritorio = h('<div class="solo-escritorio grupos-escritorio"><p class="k texto">Cada cambio es un registro nuevo '
+                   'con fecha de inicio. El modo del planificador (sombra, activo, pausa) se cambia desde Plan de '
+                   'carga.</p>{}</div>', unir(_grupo_escritorio(d, g) for g in d.grupos))
+    movil = h('<div class="solo-movil grupos-movil orden-1">{}</div>', unir(_grupo_movil(d, g) for g in d.grupos))
+    return h('{}<div class="columnas-parametros"><div class="col">{}{}</div><div class="col lateral">{}{}{}</div></div>',
+             zona, escritorio, movil, _indice(d), _formulario(d, form), _cambios(d))

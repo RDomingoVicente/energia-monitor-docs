@@ -24,7 +24,7 @@ pytestmark = pytest.mark.red_local
 
 TLS = Path(__file__).resolve().parents[1] / "fixtures" / "tls"
 PUERTO = 18443
-PANTALLAS = ["/", "/excepciones", "/excepciones?modificar=2#formulario", "/excepciones#pasadas", "/historial",
+PANTALLAS = ["/", "/plan", "/excepciones", "/excepciones?modificar=2#formulario", "/excepciones#pasadas", "/historial",
              "/historial?corregir=9#corregir", "/historial?anuladas=1", "/carga-externa", "/carga-externa?anular=3",
              "/horario", "/parametros", "/parametros?clave=desconexion_min_s", "/avisos", "/ayuda", "/ayuda?q=P75"]
 TAMANOS = [(1280, 900), (390, 844)]

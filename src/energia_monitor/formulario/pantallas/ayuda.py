@@ -25,16 +25,36 @@ ESTADOS = (
                              "con cada trayecto sin lectura."),
 )
 PANTALLAS = (
-    ("Inicio", "Estado actual: nivel con su etiqueta, coche, próxima salida y energía necesaria. Anotar lectura y "
-               "próximos 7 días."),
+    ("Inicio", "Estado actual: nivel con su etiqueta, coche, próxima salida y energía necesaria. Próximas cargas del "
+               "plan, anotar lectura y próximos 7 días."),
+    ("Plan de carga", "Lo que ha calculado el planificador: franjas con su motivo, energía y coste, precio y franjas en "
+                      "una línea de tiempo, últimas franjas y ahorro. En sombra solo se muestra; las acciones llegan "
+                      "en el paso 3c."),
     ("Excepciones", "Días que no siguen el horario: con salida (consumo normal P75 o indicado en km o %) o sin salida. "
                     "Una por fecha; se pueden modificar o dar de baja."),
     ("Horario", "Primera salida de cada día de la semana. Los cambios se aplican desde que se guardan."),
     ("Historial", "Lecturas frente a lo estimado. Mide lo bien que acierta el modelo. Corregir o anular, nunca borrar."),
     ("Carga externa", "Cargas fuera de casa con kWh y coste. Desde Inicio («Registrar carga externa») o desde el aviso "
                       "«¿Cargaste fuera de casa?»."),
-    ("Parámetros", "Valores del modelo con su origen y vigencia. Sugerencias de calibración que tú decides aplicar."),
+    ("Parámetros", "Valores del modelo por grupos, con su origen y vigencia. Sugerencias de calibración que tú decides "
+                   "aplicar."),
     ("Avisos", "Avisos activos y resueltos en los últimos 7 días. Se generan solos y desaparecen al resolverse la causa."),
+)
+
+
+# Plan de carga (etapa 3, E3.4 y E3.6): modos, niveles y guardiana.
+PLAN_CARGA = (
+    ("horario", "sombra", "Calcula el plan cada 15 minutos y con cada cambio, y lo muestra, pero no escribe en el "
+                          "cargador. Es el modo de la puesta en marcha."),
+    ("horario", "activo", "Escribe sus franjas en el cargador y las revisa cada 15 minutos (paso 3c)."),
+    ("horario", "pausa", "No escribe y desactiva sus franjas futuras; la franja en curso y la guardiana siguen."),
+    ("info", "necesaria", "La energía para salir con el objetivo de cada salida, en las horas más baratas antes de "
+                          "salir; si no bastan las baratas, también las caras."),
+    ("ok", "margen", "Un porcentaje más sobre la necesaria, solo en horas baratas con precio publicado."),
+    ("ok", "oportunista", "Carga de más cuando la energía está barata, hasta el nivel oportunista; nunca por encima "
+                          "del tope."),
+    ("estimado", "guardiana", "Una tarea del cargador siempre activa (31/12 a las 00:00, 1 minuto) para que nunca "
+                              "cargue libremente cuando no hay franjas. El sistema no la toca nunca."),
 )
 
 
@@ -154,13 +174,24 @@ def pantalla(d: AyudaDatos, q: str = "") -> Html:
     if pantallas:
         bloques.append(("pantallas", "Pantallas", h('<table class="fija"><tbody>{}</tbody></table>', unir(pantallas)),
                         False))
+    plan = [h('<div class="it-estado"><span class="tag m {}">{}</span><p>{}</p></div>', c, t, x)
+            for c, t, x in PLAN_CARGA if coincide(t, x)]
+    if plan:
+        bloques.append(("plan", "Plan de carga", h(
+            '{}<p class="k texto relleno-x">No edites desde la app de Orbis las franjas del planificador: la app las '
+            'convierte en diarias y el planificador tendría que corregirlas.</p>', unir(plan)), False))
     filas = []
-    for p in d.parametros.vigentes:
-        if not coincide(p.nombre, p.clave, p.descripcion, p.efecto):
-            continue
-        filas.append(h('<tr><td><p class="nombre">{}</p><p class="k m">{}</p></td><td class="r m">{}<span '
+    # Mismos grupos que la pantalla Parámetros, con la pregunta de cada grupo como subtítulo (E3.9).
+    for g in d.parametros.grupos:
+        del_grupo = [h('<tr><td><p class="nombre">{}</p><p class="k m">{}</p></td><td class="r m">{}<span '
                        'class="detalle-celda">{}</span></td><td>{}</td><td>{}</td></tr>', p.nombre, p.clave,
-                       valor(p.clave, p.unidad, p.valor), rango(p), p.descripcion, p.efecto))
+                       valor(p.clave, p.unidad, p.valor), rango(p), p.descripcion, p.efecto)
+                     for p in d.parametros.vigentes
+                     if p.grupo == g.grupo and coincide(p.nombre, p.clave, p.descripcion, p.efecto, g.nombre)]
+        if del_grupo:
+            filas.append(h('<tr class="grupo-ayuda"><td colspan="4"><span class="pt">{} · {}</span> <span class="k">{}'
+                           '</span></td></tr>', g.grupo, g.nombre, g.pregunta))
+            filas.extend(del_grupo)
     if filas:
         bloques.append(("parametros", "Parámetros", h(
             '<div class="tabla-desplazable"><table class="fija parametros-ayuda"><thead><tr><th>Parámetro</th><th '

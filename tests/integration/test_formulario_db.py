@@ -441,29 +441,33 @@ def test_resumen_de_semana() -> None:
 def test_parametros_vigentes_en_unidades_de_pantalla(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
     t = texto(app_rw(nombre_bd, MEDIODIA).manejar(Peticion("GET", "/parametros", CAB)).cuerpo)
     # Los tests recargan los parámetros con origen «usuario» (test_bateria_db.cargar_parametros).
-    for fila in ("Capacidad útil capacidad_util_kwh 91,3 kWh 50–120 usuario 01/01/2025",
+    # Tabla de escritorio por grupos (etapa 3): desde en dd/mm (la fecha completa, en el title).
+    t = t[t.index("Cada cambio es un registro nuevo"):]
+    for fila in ("Capacidad útil capacidad_util_kwh 91,3 kWh 50–120 usuario 01/01",
                  "Eficiencia de carga factor_bateria 0,86 0,70–1,00 usuario",
                  "Percentil de planificación percentil_planificacion 0,75 (P75) 0,50–0,95",
                  "Desconexión sin consumo desconexion_min_s 30 min 0–4 h",
                  "Aviso hueco de muestreo hueco_muestreo_aviso_s 30 min 5 min–4 h",
                  "Aviso sin lecturas aviso_sin_lectura_dias 7 días 1–14",
                  "Detectar carga completa detectar_carga_completa sí sí / no",
-                 "Observaciones para calibrar observaciones_calibracion 5 1–20"):
+                 "Observaciones para calibrar observaciones_calibracion cargas necesarias para sugerir la eficiencia 5 "
+                 "1–20"):
         assert fila in t, fila
 
 
 def test_parametros_en_el_orden_de_los_grupos(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
     """0020: el orden sale de grupo y orden (E3.9), sin lista fija en el código; claves del planificador."""
     t = texto(app_rw(nombre_bd, MEDIODIA).manejar(Peticion("GET", "/parametros", CAB)).cuerpo)
-    tabla = t[t.index("Parámetros vigentes"):]
+    tabla = t[t.index("Cada cambio es un registro nuevo"):t.index("Grupos ")]
     orden = [c for (c,) in conn.execute("SELECT clave FROM bateria_parametro_clave ORDER BY grupo, orden")]
     posiciones = [tabla.index(f" {c} ") for c in orden]
     assert posiciones == sorted(posiciones)
-    for fila in ("Publicación de precios hora_publicacion_precios 13:30 12:00–18:00",
+    for fila in ("Publicación de precios hora_publicacion_precios precios de D+1 publicados desde esta hora de D 13:30 "
+                 "12:00–18:00",
                  "Carga oportunista carga_oportunista sí sí / no",
-                 "Margen antes de salir margen_salida_min 30 min 0–120",
-                 "Potencia de carga inicial potencia_carga_inicial_kw 4,5 kW 1,4–11",
-                 "Tarea guardiana id_tarea_guardiana 9 1–10 usuario 01/01/2025 solo CLI"):
+                 "Margen antes de salir margen_salida_min 30 min 0–2 h",
+                 "Potencia de carga inicial potencia_carga_inicial_kw solo sin sesiones medidas 4,5 kW 1,4–11",
+                 "Tarea guardiana id_tarea_guardiana 9 1–10 usuario 01/01 solo CLI"):
         assert fila in tabla, fila
 
 
@@ -615,7 +619,8 @@ def test_ayuda_con_valores_vigentes(conn: psycopg.Connection, nombre_bd: str, li
     assert "Eficiencia de carga factor_bateria 0,86 0,70–1,00 Fracción de la energía medida" in t
     assert "Periodo desconectado de al menos desconexion_min_s (30 min)" in t
     html = r.cuerpo.decode()
-    assert html.count("<details") == 5 and html.count("<details class=\"pn\" open>") == 2  # móvil
+    # Móvil: 6 secciones (con Plan de carga, etapa 3); abiertas Cómo funciona y Parámetros.
+    assert html.count("<details") == 6 and html.count("<details class=\"pn\" open>") == 2
 
 
 @pytest.mark.parametrize(("q", "esta", "no_esta"), [

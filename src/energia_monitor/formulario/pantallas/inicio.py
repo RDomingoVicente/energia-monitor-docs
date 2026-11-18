@@ -199,7 +199,7 @@ def _form(d: Inicio, form: FormLectura) -> Html:
     ho_attr, ho_err = campo("hora")
     general = h('<p class="error-campo">{}</p>', form.errores["general"]) if "general" in form.errores else Html("")
     return h(
-        '<form class="pn orden-4" id="lectura" action="/lectura" method="post"><div class="ph"><h2 class="pt">Anotar lectura</h2>'
+        '<form class="pn orden-5" id="lectura" action="/lectura" method="post"><div class="ph"><h2 class="pt">Anotar lectura</h2>'
         '</div><div class="relleno">{}<div class="campo"><label for="lectura-pct" class="k">Porcentaje que marca el '
         'coche</label><div class="con-unidad"><input id="lectura-pct" name="pct" class="inp grande" type="number" '
         'inputmode="numeric" min="0" max="100" step="1" required placeholder="0–100" value="{}"{}><span>%</span>'
@@ -208,9 +208,45 @@ def _form(d: Inicio, form: FormLectura) -> Html:
         '<div class="campo"><label for="lectura-hora" class="k">Hora</label><input id="lectura-hora" name="hora" '
         'class="inp" type="time" required value="{}"{}>{}</div></div><button type="submit" class="btn">Guardar '
         'lectura</button><a href="/carga-externa" class="enlace-centrado">¿Cargaste fuera de casa? Registrar carga '
-        'externa →</a></div></form>',
+        'externa →</a><a href="/historial" class="enlace-centrado solo-movil">Historial de lecturas →</a></div></form>',
         general, form.pct, pct_attr, pct_err, form.fecha or f"{local:%Y-%m-%d}", fe_attr, fe_err,
         form.hora or f"{local:%H:%M}", ho_attr, ho_err)
+
+
+TAG_MOTIVO = {"necesaria": "info", "margen": "ok", "oportunista": "ok"}
+
+
+def _motivos(fr) -> Html:  # type: ignore[no-untyped-def]
+    nombres = list(dict.fromkeys(n for n, _, _ in fr.desglose))
+    etiquetas = [h('<span class="tag {}">{}</span>', TAG_MOTIVO.get(n, "horario"), n) for n in nombres]
+    if fr.provisional:
+        etiquetas.append(Html('<span class="tag horario">provisional</span>'))
+    return h('<span class="motivos">{}</span>', unir(etiquetas))
+
+
+def _proximas(d: Inicio) -> Html:
+    """Próximas cargas (7.1, etapa 3): las siguientes franjas del plan; en sombra, estados de sombra (7.9)."""
+    sombra = Html('<span class="tag estimado">SOMBRA</span>') if d.modo_plan == "sombra" else Html("")
+    if not d.proximas:
+        cuerpo = Html('<p class="vacio">Sin cargas programadas.</p>')
+    else:
+        filas, items = [], []
+        for fr in d.proximas:
+            coste = "—" if fr.coste is None else f"{'≈' if fr.provisional else ''}{f.numero(fr.coste, 2)} €"
+            horario = f"{f.hora(fr.inicio)}–{f.hora(fr.fin)}"
+            filas.append(h('<tr><td class="m fecha">{}<span class="tenue"> · {}</span></td><td>{}</td>'
+                           '<td class="r m fuerte">{}</td><td class="r m">{}</td><td class="r"><span class="tag horario">'
+                           '{}</span></td></tr>', f.dia(fr.inicio), horario, _motivos(fr), f.kwh(fr.kwh), coste,
+                           fr.ejecucion))
+            items.append(h('<div class="it-carga"><div class="fila"><span class="m">{} · {}</span><span class="m fuerte">'
+                           '{}</span></div><div class="fila">{}<span class="estado-carga"><span class="k m">{}</span>'
+                           '<span class="tag horario">{}</span></span></div></div>', f.dia(fr.inicio), horario,
+                           f.kwh(fr.kwh), _motivos(fr), coste, fr.ejecucion))
+        cuerpo = h('<table class="solo-escritorio"><tbody>{}</tbody></table><div class="solo-movil">{}</div>',
+                   unir(filas), unir(items))
+    return h('<section class="pn proximas-cargas orden-4"><div class="ph"><h2 class="pt">Próximas cargas</h2>'
+             '<span class="cabecera-proximas">{}<a href="/plan" class="k"><span class="solo-escritorio-i">Plan de carga'
+             '</span><span class="solo-movil-i">Plan</span> →</a></span></div>{}</section>', sombra, cuerpo)
 
 
 def _evento(ev) -> tuple[str, str]:  # type: ignore[no-untyped-def]
@@ -304,16 +340,17 @@ def pantalla(d: Inicio, form: FormLectura | None = None) -> Html:
         " cubierto" if cubierto else "", necesita, salida_txt)
     proximos = [h('<div class="it"><span>{}</span><span>{}</span></div>', f.dia_hora(dia.salida),
                   f.pct(dia.objetivo_pct)) for dia in d.dias if dia.salida is not None][:3]
-    dias_movil = h('<section class="pn solo-movil orden-5"><div class="ph"><h2 class="pt">Próximos días</h2>'
+    dias_movil = h('<section class="pn solo-movil orden-6"><div class="ph"><h2 class="pt">Próximos días</h2>'
                    '<a href="/excepciones" class="k">7 días →</a></div>{}</section>',
                    h('<div class="lista">{}</div>', unir(proximos)) if proximos
                    else Html('<p class="vacio">Ninguna salida en 7 días.</p>'))
     banners = _banners(d)
     zona_banners = h('<div class="banners orden-1">{}</div>', unir(banners)) if banners else Html("")
     # Escritorio: dos columnas. Móvil: .col pasa a display: contents y los bloques se ordenan con orden-N
-    # (banner, batería, coche y necesita, lectura, próximos días); los de solo-escritorio se ocultan.
-    return h('{}<div class="columnas"><div class="col">{}{}{}{}{}</div><div class="col">{}{}{}</div></div>',
-             resumen, h('<div class="solo-escritorio">{}</div>', bateria),
+    # (banner, batería, coche y necesita, próximas cargas, lectura, próximos días); los de solo-escritorio se
+    # ocultan.
+    return h('{}<div class="columnas"><div class="col">{}{}{}{}{}{}</div><div class="col">{}{}{}</div></div>',
+             resumen, h('<div class="solo-escritorio">{}</div>', bateria), _proximas(d),
              h('<div class="solo-escritorio">{}</div>', dias7), bateria_movil, coche_movil, dias_movil,
              zona_banners, _form(d, form), eventos)
 

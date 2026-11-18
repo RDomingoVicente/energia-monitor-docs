@@ -97,6 +97,9 @@ class Inicio:
     aviso_sin_lecturas: bool = False
     intervalo_incoherente: bool = False
     lectura_guardada: LecturaGuardada | None = None
+    # Próximas cargas (7.1, etapa 3): las pone app.get_inicio con plan_datos.proximas_cargas.
+    modo_plan: str = "sombra"
+    proximas: list[Any] = field(default_factory=list)
 
 
 def version_bd(conn: psycopg.Connection) -> str | None:
@@ -485,6 +488,16 @@ class Parametro:
     id: int
     grupo: int  # bateria_parametro_grupo (0020); el orden de la lista sale de grupo y orden
     editable: bool  # false: se muestra pero no se cambia desde la página (id_tarea_guardiana)
+    nota: str | None = None  # nota de una línea bajo el nombre (0021)
+
+
+@dataclass(frozen=True)
+class Grupo:
+    grupo: int
+    nombre: str
+    pregunta: str
+    avanzado: bool
+    abierto_movil: bool
 
 
 @dataclass(frozen=True)
@@ -495,6 +508,7 @@ class Cambio:
     valor: Decimal
     anterior: Decimal | None
     nota: str
+    n: int = 1  # > 1: alta en bloque (claves nuevas de una migración), una sola línea
 
 
 @dataclass(frozen=True)
@@ -512,22 +526,64 @@ class Parametros:
     vigentes: list[Parametro]
     cambios: list[Cambio]
     calibracion: Calibracion
+    grupos: list[Grupo] = field(default_factory=list)
+    # Notas calculadas (7.5): sustituyen a la nota fija de esas claves.
+    notas: dict[str, str] = field(default_factory=dict)
 
     def de(self, clave: str) -> Parametro:
         return next(p for p in self.vigentes if p.clave == clave)
+
+
+def _cambios_agrupados(filas: list[Cambio], n: int = 5) -> list[Cambio]:
+    """Los n cambios más recientes; las altas en bloque (sin valor anterior, misma fecha y misma nota, ids
+    seguidos: las claves nuevas de una migración) cuentan como una sola línea."""
+    salida: list[Cambio] = []
+    for c in filas:
+        ultimo = salida[-1] if salida else None
+        if (ultimo is not None and c.anterior is None and ultimo.anterior is None and c.desde == ultimo.desde
+                and c.nota == ultimo.nota and c.id == ultimo.id - ultimo.n):
+            salida[-1] = Cambio(ultimo.id, ultimo.clave, ultimo.desde, ultimo.valor, None, ultimo.nota, ultimo.n + 1)
+        elif len(salida) < n:
+            salida.append(c)
+        else:
+            break
+    return salida
+
+
+def _notas(conn: psycopg.Connection, ahora: datetime, vigentes: list[Parametro]) -> dict[str, str]:
+    valor = {p.clave: p.valor for p in vigentes}
+    notas: dict[str, str] = {}
+    fila = conn.execute("SELECT umbral_eur_kwh FROM plan_calculo ORDER BY ahora DESC, id DESC LIMIT 1").fetchone()
+    if fila is not None and fila[0] is not None and "ventana_umbral_dias" in valor:
+        notas["umbral_oportunista_pct"] = (f"de la media de {int(valor['ventana_umbral_dias'])} días · hoy "
+                                           f"{fila[0]:.3f} €/kWh".replace(".", ","))
+    if "historial_min_disponibilidad_dias" in valor and "ventana_disponibilidad_dias" in valor:
+        dias = conn.execute(
+            "SELECT count(DISTINCT (instante AT TIME ZONE 'Europe/Madrid')::date) FROM cargador_muestra"
+            " WHERE estado IS NOT NULL AND instante > %s - %s * interval '1 day' AND instante <= %s",
+            (ahora, valor["ventana_disponibilidad_dias"], ahora)).fetchone()
+        n = int(dias[0]) if dias else 0
+        modo = "modo prudente" if n < valor["historial_min_disponibilidad_dias"] else "disponibilidad aprendida"
+        notas["historial_min_disponibilidad_dias"] = f"historial actual: {n} día{'s' if n != 1 else ''} → {modo}"
+    if "max_tareas_sistema" in valor:
+        propias = int(valor["max_tareas_sistema"]) + 1
+        notas["max_tareas_sistema"] = f"+ guardiana = {propias}; {10 - propias} huecos para la app"
+    return notas
 
 
 def parametros(conn: psycopg.Connection, ahora: datetime) -> Parametros:
     hoy = ahora.astimezone(MADRID).date()
     vigentes = [Parametro(*f) for f in conn.execute(
         "SELECT k.clave, k.nombre, k.unidad, k.minimo, k.maximo, k.descripcion, k.efecto, p.valor, p.origen,"
-        " lower(p.vigencia), p.id, k.grupo, k.editable FROM bateria_parametro_clave k JOIN bateria_parametro p"
+        " lower(p.vigencia), p.id, k.grupo, k.editable, k.nota FROM bateria_parametro_clave k JOIN bateria_parametro p"
         " ON p.clave = k.clave AND p.vigencia @> %s::date ORDER BY k.grupo, k.orden", (hoy,))]
-    cambios = [Cambio(*f) for f in conn.execute(
+    grupos = [Grupo(*f) for f in conn.execute(
+        "SELECT grupo, nombre, pregunta, avanzado, abierto_movil FROM bateria_parametro_grupo ORDER BY grupo")]
+    cambios = _cambios_agrupados([Cambio(*f) for f in conn.execute(
         "SELECT p.id, p.clave, lower(p.vigencia), p.valor, a.valor, coalesce(p.nota, p.fuente)"
         " FROM bateria_parametro p LEFT JOIN LATERAL (SELECT q.valor FROM bateria_parametro q"
         " WHERE q.clave = p.clave AND lower(q.vigencia) < lower(p.vigencia) ORDER BY lower(q.vigencia) DESC LIMIT 1) a"
-        " ON true ORDER BY p.id DESC LIMIT 5")]
+        " ON true ORDER BY p.id DESC LIMIT 200")])
     fila = conn.execute(
         "SELECT s.factor, s.observaciones, bateria_param('factor_bateria', %(a)s),"
         " (SELECT min(o.factor_observado) FROM (SELECT c.factor_observado FROM v_bateria_calibracion c"
@@ -536,7 +592,8 @@ def parametros(conn: psycopg.Connection, ahora: datetime) -> Parametros:
         "   WHERE c.hasta <= %(a)s ORDER BY c.hasta DESC LIMIT s.observaciones) o)"
         " FROM bateria_factor_sugerido(%(a)s) s", {"a": ahora}).fetchone()
     assert fila is not None
-    return Parametros(ahora, vigentes, cambios, Calibracion(fila[0], fila[2], fila[1], fila[3], fila[4]))
+    return Parametros(ahora, vigentes, cambios, Calibracion(fila[0], fila[2], fila[1], fila[3], fila[4]), grupos,
+                      _notas(conn, ahora, vigentes))
 
 
 def parametro_registrado(conn: psycopg.Connection, id_: int) -> tuple[str, Decimal, date, str] | None:

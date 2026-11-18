@@ -24,13 +24,14 @@ from urllib.parse import parse_qs, urlsplit
 import psycopg
 
 from energia_monitor import __version__, bateria_servicio, db, parametros
-from energia_monitor.formulario import datos
+from energia_monitor.formulario import datos, plan_datos
 from energia_monitor.formulario.html import Html
 from energia_monitor.formulario import formato
 from energia_monitor.formulario.pantallas import ayuda
 from energia_monitor.formulario.pantallas import avisos as pantalla_avisos
 from energia_monitor.formulario.pantallas import carga_externa, excepciones, historial, horario, inicio
 from energia_monitor.formulario.pantallas import parametros as pantalla_parametros
+from energia_monitor.formulario.pantallas import plan_carga as pantalla_plan
 from energia_monitor.formulario.plantilla import Marco, banner, error_pagina, pagina
 
 log = logging.getLogger(__name__)
@@ -139,6 +140,10 @@ class App:
             return _texto(405, "Método no admitido")
         if p.camino == "/":
             return self._con_bd(lambda conn, marco: self.get_inicio(conn, marco, p))
+        if p.camino == "/plan":
+            return self._con_bd(lambda conn, marco: _html(200, pagina(
+                marco, "plan", "plan", pantalla_plan.pantalla(plan_datos.plan_carga(conn, self.reloj())),
+                "Plan de carga")))
         if p.camino == "/excepciones":
             return self._con_bd(lambda conn, marco: self.get_excepciones(conn, marco, p))
         if p.camino == "/historial":
@@ -217,6 +222,7 @@ class App:
     def get_inicio(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
                    form: inicio.FormLectura | None = None, estado: int = 200) -> Respuesta:
         d = datos.inicio(conn, self.reloj())
+        d.modo_plan, d.proximas = plan_datos.proximas_cargas(conn, self.reloj())
         ok = _ok(p)
         if form is None and ok is not None and ok[0] == "lectura":
             d.lectura_guardada = datos.lectura_guardada(conn, ok[1])
