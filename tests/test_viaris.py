@@ -19,13 +19,19 @@ import pytest
 
 from energia_monitor import viaris
 from energia_monitor.viaris import (
+    ESCRITURAS,
     LECTURAS,
     RUTA_EVSM,
     RUTA_HISTORICO,
     RUTA_MODULADOR,
+    RUTA_PROGRAMADOR,
+    RUTA_TAREAS,
     ClienteViaris,
+    CuerpoNoPermitido,
     ErrorCargador,
     RutaNoPermitida,
+    parsear_programador,
+    validar_escritura,
     parsear_evsm,
     parsear_historico,
     parsear_linea_historico,
@@ -63,8 +69,12 @@ class Abridor:
 # --- Lista cerrada ---------------------------------------------------------------
 
 
-def test_lista_cerrada_solo_get_de_esta_etapa() -> None:
-    assert LECTURAS == {("GET", RUTA_MODULADOR), ("GET", RUTA_EVSM), ("GET", RUTA_HISTORICO)}
+def test_lista_cerrada_de_esta_etapa() -> None:
+    # Paso 3c: el GET del programador y POST, PUT y DELETE de las tareas del conector; nada más.
+    assert LECTURAS == {("GET", RUTA_MODULADOR), ("GET", RUTA_EVSM), ("GET", RUTA_HISTORICO),
+                        ("GET", "/modules/scheduler/elements?level=cfg")}
+    assert ESCRITURAS == {(m, "/modules/scheduler/elements/mennekes") for m in ("POST", "PUT", "DELETE")}
+    assert RUTA_PROGRAMADOR in {r for _, r in LECTURAS} and RUTA_TAREAS == "/modules/scheduler/elements/mennekes"
 
 
 @pytest.mark.parametrize("metodo", ["POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "get", "GET "])
@@ -81,8 +91,9 @@ def test_rechaza_metodos_distintos_de_get(metodo: str, ruta: str) -> None:
     "/modules/network",
     "/modules/network?level=all",
     "/modules/mqtt_user?level=all",
-    "/modules/scheduler/elements/mennekes",
-    "/modules/scheduler/elements?level=cfg",
+    "/modules/scheduler/elements/mennekes",  # solo para escrituras
+    "/modules/scheduler/elements?level=all",
+    "/modules/scheduler/elements",
     "/device",
     "/elements",
     "/elements?level=stat",
@@ -216,3 +227,85 @@ def test_modulador_mal_formado(datos: Any) -> None:
 def test_evsm_mal_formado(datos: Any) -> None:
     with pytest.raises(ErrorCargador):
         parsear_evsm(datos)
+
+
+# --- Programador y escrituras (paso 3c) -------------------------------------------------
+
+
+def test_programador_real() -> None:
+    """Respuesta real del 18/11/2026: tareas 5 y 6 del usuario (semanales, inactivas) y 9, la guardiana."""
+    for ruta in fixtures("modules_scheduler_elements_level_cfg"):
+        tareas = parsear_programador(cargar(ruta))
+        assert [(x.id, x.activa, x.weekday, x.hour_min, x.duracion) for x in tareas] == [
+            (5, False, 4, 1380, 59), (6, False, 8, 0, 480), (9, True, 0, 0, 1)]
+        assert [x.dia_mes for x in tareas] == [None, None, (31, 12)]
+
+
+def tarea(**cambios: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {"id": 3, "active": 1, "user": "", "group": 0, "priority": 1,
+                            "initTime": {"day": 1 << 18, "month": 1 << 10, "weekday": 0,
+                                         "timeList": [{"hourMin": 1380, "duration": 60}]}}
+    base.update(cambios)
+    return base
+
+
+def test_escritura_valida_con_json_y_sin_campos_calculados() -> None:
+    abridor = Abridor(b"[]")
+    cliente = ClienteViaris("http://192.168.1.34", abrir=abridor)
+    cliente.escribir("POST", {"tasks": [tarea()]}, frozenset({3}))
+    cliente.escribir("DELETE", {"tasks": [{"id": 3}]}, frozenset({3}))
+    (post, _), (delete, _) = abridor.peticiones
+    assert post.get_method() == "POST" and post.full_url == "http://192.168.1.34/modules/scheduler/elements/mennekes"
+    assert post.get_header("Content-type") == "application/json; charset=utf-8"
+    assert json.loads(post.data) == {"tasks": [tarea()]}
+    assert delete.get_method() == "DELETE" and json.loads(delete.data) == {"tasks": [{"id": 3}]}
+
+
+@pytest.mark.parametrize(("metodo", "cuerpo", "mensaje"), [
+    ("POST", {"tasks": [tarea(), tarea(id=4)]}, "una sola tarea"),
+    ("POST", {"tasks": [tarea(id=11)]}, "id de tarea no válido"),
+    ("POST", {"tasks": [tarea(id=True)]}, "id de tarea no válido"),
+    ("PUT", {"tasks": [tarea(id=5)]}, "no es propia"),
+    ("DELETE", {"tasks": [{"id": 5}]}, "no es propia"),
+    ("DELETE", {"tasks": [{"id": 3, "active": 0}]}, "solo lleva el id"),
+    ("POST", {"tasks": [tarea(type=1)]}, "type 0"),
+    ("POST", {"tasks": [tarea(active=2)]}, "active"),
+    ("POST", {"tasks": [tarea(_initLocaltime=0)]}, "campos no admitidos"),
+    ("POST", {"tasks": [tarea(initTime={"day": 0, "month": 0, "weekday": 0,
+                                        "timeList": [{"hourMin": 0, "duration": 60}]})]}, "con fecha"),
+    ("POST", {"tasks": [tarea(initTime={"day": 1 << 18, "month": 1 << 10, "weekday": 32,
+                                        "timeList": [{"hourMin": 0, "duration": 60}]})]}, "con fecha"),
+    ("POST", {"tasks": [tarea(initTime={"day": 3, "month": 1 << 10, "weekday": 0,
+                                        "timeList": [{"hourMin": 0, "duration": 60}]})]}, "con fecha"),
+    ("POST", {"tasks": [tarea(initTime={"day": 1 << 18, "month": 1 << 10, "weekday": 0,
+                                        "timeList": [{"hourMin": 1380, "duration": 540}]})]}, "medianoche"),
+    ("POST", {"tasks": [tarea(initTime={"day": 1 << 18, "month": 1 << 10, "weekday": 0,
+                                        "timeList": [{"hourMin": 60, "duration": 60}, {"hourMin": 600,
+                                                                                       "duration": 60}]})]},
+     "una sola franja"),
+    ("POST", {"tasks": [tarea()], "x": 1}, "una sola tarea"),
+])
+def test_escrituras_no_permitidas(metodo: str, cuerpo: dict[str, Any], mensaje: str) -> None:
+    abridor = Abridor()
+    with pytest.raises(CuerpoNoPermitido, match=mensaje):
+        ClienteViaris("http://192.168.1.34", abrir=abridor).escribir(metodo, cuerpo, frozenset({3}))
+    assert abridor.peticiones == []
+
+
+@pytest.mark.parametrize(("metodo", "ruta"), [("POST", "/reset/sys"), ("PUT", "/modules/network"),
+                                              ("PUT", "/device"), ("POST", RUTA_PROGRAMADOR),
+                                              ("PATCH", RUTA_TAREAS), ("GET", RUTA_TAREAS)])
+def test_cuerpo_solo_en_las_rutas_de_escritura(metodo: str, ruta: str) -> None:
+    abridor = Abridor()
+    with pytest.raises(RutaNoPermitida):
+        ClienteViaris("http://192.168.1.34", abrir=abridor).pedir(metodo, ruta, {"tasks": [tarea()]})
+    with pytest.raises(RutaNoPermitida):
+        validar_escritura("PATCH", {"tasks": [tarea()]}, frozenset({3}))
+    assert abridor.peticiones == []
+
+
+def test_la_guardiana_es_una_escritura_valida() -> None:
+    """31/12 a las 00:00 durante 1 minuto, con id 9 propio."""
+    validar_escritura("PUT", {"tasks": [tarea(id=9, initTime={"day": 1 << 30, "month": 1 << 11, "weekday": 0,
+                                                           "timeList": [{"hourMin": 0, "duration": 1}]})]},
+                      frozenset({9}))

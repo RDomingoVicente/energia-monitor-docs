@@ -1,0 +1,88 @@
+[{
+		"name":	"mennekes",
+		"data":	{
+			"uid":	17,
+			"cfg":	{
+				"tasks":	[{
+						"id":	5,
+						"user":	"",
+						"group":	0,
+						"priority":	1,
+						"initTime":	{
+							"day":	0,
+							"month":	0,
+							"weekday":	4,
+							"timeList":	[{
+									"hourMin":	1380,
+									"duration":	59,
+									"maxPower":	0,
+									"phases":	0,
+									"_initLocaltime":	1794952800,
+									"_endLocaltime":	1794956340
+								}]
+						},
+						"active":	0,
+						"type":	0,
+						"maxPower":	-1,
+						"solarPriority":	0,
+						"minCurrent":	0,
+						"validFrom":	0,
+						"validTo":	0,
+						"chargeRelated":	0
+					}, {
+						"id":	6,
+						"user":	"",
+						"group":	0,
+						"priority":	1,
+						"initTime":	{
+							"day":	0,
+							"month":	0,
+							"weekday":	8,
+							"timeList":	[{
+									"hourMin":	0,
+									"duration":	480,
+									"maxPower":	0,
+									"phases":	0,
+									"_initLocaltime":	1794956400,
+									"_endLocaltime":	1794985200
+								}]
+						},
+						"active":	0,
+						"type":	0,
+						"maxPower":	-1,
+						"solarPriority":	0,
+						"minCurrent":	0,
+						"validFrom":	0,
+						"validTo":	0,
+						"chargeRelated":	0
+					}, {
+						"id":	9,
+						"user":	"",
+						"group":	0,
+						"priority":	1,
+						"initTime":	{
+							"day":	1073741824,
+							"month":	2048,
+							"weekday":	0,
+							"timeList":	[{
+									"hourMin":	0,
+									"duration":	1,
+									"maxPower":	0,
+									"phases":	0,
+									"_initLocaltime":	0,
+									"_endLocaltime":	0
+								}]
+						},
+						"active":	1,
+						"type":	0,
+						"maxPower":	-1,
+						"solarPriority":	0,
+						"minCurrent":	0,
+						"validFrom":	0,
+						"validTo":	0,
+						"chargeRelated":	0
+					}],
+				"defaultState":	1
+			}
+		}
+	}]

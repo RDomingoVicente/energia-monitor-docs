@@ -667,7 +667,7 @@ def test_claves_con_textos_y_rango(conn: psycopg.Connection, limpio: None) -> No
     filas = conn.execute(
         "SELECT k.clave, k.nombre, k.descripcion, k.efecto, k.minimo, k.maximo, p.valor"
         " FROM bateria_parametro_clave k JOIN bateria_parametro p USING (clave) ORDER BY k.clave").fetchall()
-    assert len(filas) == 34  # 15 de la etapa 2 y 19 del planificador (0020)
+    assert len(filas) == 35  # 15 de la etapa 2, 19 del planificador (0020) y congelar_franja_min (0022)
     for clave, nombre, descripcion, efecto, minimo, maximo, valor in filas:
         assert nombre and descripcion and efecto, clave
         assert minimo <= valor <= maximo, clave

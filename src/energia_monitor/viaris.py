@@ -1,11 +1,15 @@
 """Cliente HTTP del cargador Orbis Viaris (API local, docs/viaris-api.md).
 
 El cargador es un equipo en producción sin autenticación. Todo acceso pasa por
-ClienteViaris, que solo admite los pares (método, ruta) de LECTURAS: en la
-etapa 1, únicamente los GET que usa el muestreo. La comparación es exacta
-(ruta y query) y se hace antes de abrir ninguna conexión. Sin redirecciones
-(podrían llevar a otra ruta), sin proxies y sin reintentos: el muestreo lo
-vuelve a intentar en el siguiente ciclo.
+ClienteViaris, que solo admite los pares (método, ruta) de LECTURAS (los GET
+del muestreo y, desde el paso 3c, el del programador) y de ESCRITURAS (POST,
+PUT y DELETE de las tareas del conector, paso 3c). La comparación es exacta
+(ruta y query) y se hace antes de abrir ninguna conexión. Cada escritura se
+valida además contra los formatos verificados el 13/11/2026: una tarea por
+petición, con fecha, sin cruzar la medianoche, y solo con ids propios (doble
+cerrojo con el reconciliador). Sin redirecciones (podrían llevar a otra ruta),
+sin proxies y sin reintentos: el muestreo lo vuelve a intentar en el ciclo
+siguiente.
 """
 
 from __future__ import annotations
@@ -29,16 +33,30 @@ log = logging.getLogger(__name__)
 RUTA_MODULADOR = "/modules/modulator?level=stat"
 RUTA_EVSM = "/modules/evsm/elements"
 RUTA_HISTORICO = "/modules/modulator/historic"
+RUTA_PROGRAMADOR = "/modules/scheduler/elements?level=cfg"
+CONECTOR = "mennekes"
+RUTA_TAREAS = f"/modules/scheduler/elements/{CONECTOR}"
 
-# Lista cerrada. Ampliarla solo cuando lo pida la tarea en curso.
+# Listas cerradas. Ampliarlas solo cuando lo pida la tarea en curso.
 LECTURAS: frozenset[tuple[str, str]] = frozenset({
     ("GET", RUTA_MODULADOR),
     ("GET", RUTA_EVSM),
     ("GET", RUTA_HISTORICO),
+    ("GET", RUTA_PROGRAMADOR),  # paso 3c
+})
+ESCRITURAS: frozenset[tuple[str, str]] = frozenset({
+    ("POST", RUTA_TAREAS),  # crear (id libre)
+    ("PUT", RUTA_TAREAS),  # modificar o activar (tarea completa)
+    ("DELETE", RUTA_TAREAS),  # borrar ({"tasks":[{"id":N}]})
 })
 
 TIMEOUT_S = 5.0
-CONECTOR = "mennekes"
+MAX_TAREAS = 10
+# Campos de una tarea que se envían al crearla o modificarla (los de la tarea leída, sin los calculados por el
+# cargador que empiezan por «_»).
+CAMPOS_TAREA = frozenset({"id", "user", "group", "priority", "initTime", "active", "type", "maxPower",
+                          "solarPriority", "minCurrent", "validFrom", "validTo", "chargeRelated"})
+CAMPOS_FRANJA = frozenset({"hourMin", "duration", "maxPower", "phases"})
 CAMPOS_HISTORICO = 18
 USER_AGENT = f"energia-monitor/{__version__}"
 
@@ -49,6 +67,40 @@ class RutaNoPermitida(Exception):
 
 class ErrorCargador(ErrorFuente):
     """El cargador no responde o su respuesta no se puede interpretar."""
+
+
+class CuerpoNoPermitido(Exception):
+    """Escritura con un cuerpo fuera de los formatos verificados o sobre una tarea que no es propia."""
+
+
+@dataclass(frozen=True)
+class Tarea:
+    """Una tarea del programador (GET /modules/scheduler/elements?level=cfg)."""
+
+    id: int
+    activa: bool
+    tipo: int
+    weekday: int
+    day: int
+    month: int
+    hour_min: int
+    duracion: int
+    datos: dict[str, Any]  # la tarea tal cual llegó, para modificarla completa
+
+    @property
+    def con_fecha(self) -> bool:
+        return self.weekday == 0 and _un_bit(self.day, 31) and _un_bit(self.month, 12)
+
+    @property
+    def dia_mes(self) -> tuple[int, int] | None:
+        """(día, mes) de una tarea con fecha; None si es semanal o diaria."""
+        if not self.con_fecha:
+            return None
+        return self.day.bit_length(), self.month.bit_length()
+
+
+def _un_bit(mascara: int, maximo: int) -> bool:
+    return 0 < mascara < (1 << maximo) and mascara & (mascara - 1) == 0
 
 
 @dataclass(frozen=True)
@@ -102,11 +154,19 @@ class ClienteViaris:
         self.timeout = timeout
         self._abrir = abrir or _abridor()
 
-    def pedir(self, metodo: str, ruta: str) -> Any:
-        """Petición validada contra LECTURAS; devuelve el JSON decodificado."""
-        if (metodo, ruta) not in LECTURAS:
+    def pedir(self, metodo: str, ruta: str, cuerpo: dict[str, Any] | None = None) -> Any:
+        """Petición validada contra LECTURAS (sin cuerpo) o ESCRITURAS (con cuerpo ya validado por
+        validar_escritura); devuelve el JSON decodificado."""
+        if cuerpo is None and (metodo, ruta) not in LECTURAS:
             raise RutaNoPermitida(f"{metodo} {ruta} no está en la lista cerrada del cliente del cargador")
-        peticion = urllib.request.Request(self.base + ruta, method=metodo, headers={"User-Agent": USER_AGENT})
+        if cuerpo is not None and (metodo, ruta) not in ESCRITURAS:
+            raise RutaNoPermitida(f"{metodo} {ruta} no admite escrituras en el cliente del cargador")
+        cabeceras = {"User-Agent": USER_AGENT}
+        datos = None
+        if cuerpo is not None:
+            cabeceras["Content-Type"] = "application/json; charset=utf-8"
+            datos = json.dumps(cuerpo, separators=(",", ":")).encode()
+        peticion = urllib.request.Request(self.base + ruta, data=datos, method=metodo, headers=cabeceras)
         try:
             with self._abrir(peticion, timeout=self.timeout) as respuesta:
                 cuerpo = respuesta.read()
@@ -127,6 +187,63 @@ class ClienteViaris:
 
     def historico(self) -> list[Sesion]:
         return parsear_historico(self.pedir("GET", RUTA_HISTORICO))
+
+    def tareas(self) -> list[Tarea]:
+        """Tareas del programador del conector (paso 3c)."""
+        return parsear_programador(self.pedir("GET", RUTA_PROGRAMADOR))
+
+    def escribir(self, metodo: str, cuerpo: dict[str, Any], propios: frozenset[int]) -> Any:
+        """POST, PUT o DELETE de una tarea propia. Valida antes de conectar; la confirmación (GET) la hace
+        quien llama."""
+        validar_escritura(metodo, cuerpo, propios)
+        return self.pedir(metodo, RUTA_TAREAS, cuerpo)
+
+
+def validar_escritura(metodo: str, cuerpo: Any, propios: frozenset[int]) -> None:
+    """Solo los formatos verificados (docs/viaris-api.md, 13/11/2026), una tarea por petición, tarea propia.
+
+    - DELETE: exactamente {"tasks":[{"id":N}]}.
+    - POST y PUT: tarea de carga (type 0 si viene) con fecha (weekday 0, día y mes de un solo bit), una franja
+      que no cruza la medianoche, active 0 o 1 y solo los campos conocidos.
+    """
+    if metodo not in ("POST", "PUT", "DELETE"):
+        raise RutaNoPermitida(f"{metodo} no es una escritura del programador")
+    if not isinstance(cuerpo, dict) or set(cuerpo) != {"tasks"} or not isinstance(cuerpo["tasks"], list) \
+            or len(cuerpo["tasks"]) != 1 or not isinstance(cuerpo["tasks"][0], dict):
+        raise CuerpoNoPermitido("se escribe una sola tarea por petición: {\"tasks\": [{...}]}")
+    tarea = cuerpo["tasks"][0]
+    ident = tarea.get("id")
+    if not _entero(ident) or not 1 <= ident <= MAX_TAREAS:
+        raise CuerpoNoPermitido(f"id de tarea no válido: {ident!r}")
+    if ident not in propios:
+        raise CuerpoNoPermitido(f"la tarea {ident} no es propia: no se toca")
+    if metodo == "DELETE":
+        if set(tarea) != {"id"}:
+            raise CuerpoNoPermitido("DELETE solo lleva el id de la tarea")
+        return
+    if not set(tarea) <= CAMPOS_TAREA:
+        raise CuerpoNoPermitido(f"campos no admitidos: {sorted(set(tarea) - CAMPOS_TAREA)}")
+    if tarea.get("type", 0) != 0:
+        raise CuerpoNoPermitido("solo tareas de carga (type 0)")
+    if tarea.get("active") not in (0, 1) or isinstance(tarea.get("active"), bool):
+        raise CuerpoNoPermitido("active debe ser 0 o 1")
+    inicio = tarea.get("initTime")
+    if not isinstance(inicio, dict) or set(inicio) != {"day", "month", "weekday", "timeList"}:
+        raise CuerpoNoPermitido("initTime debe llevar day, month, weekday y timeList")
+    if inicio["weekday"] != 0 or not _entero(inicio["day"]) or not _entero(inicio["month"]) \
+            or not _un_bit(inicio["day"], 31) or not _un_bit(inicio["month"], 12):
+        raise CuerpoNoPermitido("solo tareas con fecha: weekday 0 y day y month de un solo bit")
+    lista = inicio["timeList"]
+    if not isinstance(lista, list) or len(lista) != 1 or not isinstance(lista[0], dict) \
+            or not set(lista[0]) <= CAMPOS_FRANJA or not {"hourMin", "duration"} <= set(lista[0]):
+        raise CuerpoNoPermitido("timeList debe llevar una sola franja con hourMin y duration")
+    hora, duracion = lista[0]["hourMin"], lista[0]["duration"]
+    if not _entero(hora) or not _entero(duracion) or not 0 <= hora < 1440 or not 1 <= duracion <= 1440 - hora:
+        raise CuerpoNoPermitido("la franja debe estar dentro del día: una tarea no cruza la medianoche")
+
+
+def _entero(valor: object) -> bool:
+    return isinstance(valor, int) and not isinstance(valor, bool)
 
 
 # --- Interpretación de las respuestas --------------------------------------------
@@ -202,6 +319,31 @@ def parsear_linea_historico(linea: str) -> Sesion | None:
     if inicio <= 0 or fin < inicio or sesion.energia_wh < 0:
         return None
     return sesion
+
+
+def parsear_programador(datos: Any) -> list[Tarea]:
+    """GET /modules/scheduler/elements?level=cfg: tareas del conector mennekes (fixture del 18/11/2026)."""
+    try:
+        elemento = next(e for e in datos if e.get("name") == CONECTOR)
+        crudas = elemento["data"]["cfg"]["tasks"]
+    except (StopIteration, KeyError, TypeError, AttributeError) as e:
+        raise ErrorCargador(f"respuesta del programador sin tareas del conector {CONECTOR}") from e
+    if not isinstance(crudas, list):
+        raise ErrorCargador("tasks del programador no es una lista")
+    tareas = []
+    for t in crudas:
+        try:
+            inicio = t["initTime"]
+            franja = inicio["timeList"][0]
+            campos = (t["id"], t["active"], t.get("type", 0), inicio["weekday"], inicio["day"], inicio["month"],
+                      franja["hourMin"], franja["duration"])
+        except (KeyError, IndexError, TypeError) as e:
+            raise ErrorCargador(f"tarea del programador mal formada ({e})") from e
+        if not all(_entero(c) for c in campos):
+            raise ErrorCargador(f"tarea del programador con campos no enteros: {t.get('id')!r}")
+        ident, activa, tipo, weekday, day, month, hora, duracion = campos
+        tareas.append(Tarea(ident, activa == 1, tipo, weekday, day, month, hora, duracion, t))
+    return tareas
 
 
 def parsear_historico(datos: Any) -> list[Sesion]:

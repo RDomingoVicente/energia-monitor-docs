@@ -35,6 +35,7 @@ PUBLICADAS = {
     "0019_evento_carga_medida.sql": "1b8e52468253dd25cd075702f47ec328667746a5feb617d34c460ba974fb907c",
     "0020_planificador.sql": "930e0e80fa0cf980a5ea5ac270c06df060d42c6c58952db3519126eb69b86979",
     "0021_plan_pantalla.sql": "7b5e4c2161af1a0b5d1e86897f82685d57305877921ccc77f1bd76b105b3db42",
+    "0022_planificador_escritura.sql": "c2cd16b3760c516585e0316f793ceb220b44bf09984dec36f5d922974d1175a8",
 }
 
 

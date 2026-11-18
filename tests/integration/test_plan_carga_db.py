@@ -36,7 +36,8 @@ GRUPOS = {
         "nivel_oportunista_pct", "ventana_precio_esperado_dias", "ventana_umbral_dias"],
     5: ["ventana_disponibilidad_dias", "umbral_disponibilidad_pct", "historial_min_disponibilidad_dias"],
     6: ["potencia_carga_inicial_kw", "ventana_potencia_dias", "franja_min_min", "max_tareas_sistema",
-        "horizonte_provisional_h", "horizonte_plan_h", "hora_publicacion_precios", "id_tarea_guardiana"],
+        "horizonte_provisional_h", "horizonte_plan_h", "hora_publicacion_precios", "id_tarea_guardiana",
+        "congelar_franja_min"],  # 0022
     7: ["aviso_sin_lectura_dias", "hueco_muestreo_aviso_s", "aviso_planificador_min"],
 }
 

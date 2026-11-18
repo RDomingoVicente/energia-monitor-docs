@@ -41,7 +41,7 @@ CONECTADO = range(3, 9)
 LIBRE = (1, 2)
 ORDEN = {"sesion": 1, "carga_completa": 2, "trayecto": 3, "carga_externa": 4, "lectura": 5}
 
-# Valores iniciales de las migraciones 0014, 0016 y 0020, vigentes desde el 1/1/2025.
+# Valores iniciales de las migraciones 0014, 0016, 0020 y 0022, vigentes desde el 1/1/2025.
 PARAMETROS_INICIALES: dict[str, Decimal] = {
     "capacidad_util_kwh": Decimal("91.3"),
     "reserva_pct": Decimal(25),
@@ -78,6 +78,7 @@ PARAMETROS_INICIALES: dict[str, Decimal] = {
     "ventana_potencia_dias": Decimal(28),
     "horizonte_plan_h": Decimal(72),
     "hora_publicacion_precios": Decimal(810),  # minutos desde las 00:00 (13:30)
+    "congelar_franja_min": Decimal(30),  # 0022
 }
 
 
