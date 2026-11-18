@@ -117,3 +117,50 @@ muestreo (y que un fallo no lo detiene), salida del CLI, formulario
 - Pantallas Plan de carga, panel de Inicio y Parámetros agrupada (3b).
 - Cambio de modo, Cargar ahora, franjas manuales y bloqueos (3c).
 - Avisos nuevos, correo y Grafana (3d).
+
+## Comprobación en el NAS (aceptación de 3a)
+
+Desde /volume1/docker/energia-monitor, con `psql` en el contenedor `db`
+(`docker compose exec db psql -U energia -d energia`).
+
+Ciclo cada 15 minutos (minutos desde el cálculo anterior; con el muestreo
+cada 60 s, el periódico sale entre 15 y 16):
+
+```sql
+SELECT ahora AT TIME ZONE 'Europe/Madrid' AS hora, motivo, round(duracion_ms) AS ms,
+       round(extract(epoch FROM ahora - lag(ahora) OVER (ORDER BY ahora)) / 60, 1) AS min_desde_anterior
+FROM plan_calculo WHERE ahora > now() - interval '3 hours' ORDER BY ahora;
+```
+
+Recálculo tras enchufar o desenchufar (cada cambio de estado) y tras una
+lectura (desde su alta): retraso hasta el primer cálculo posterior, menos de
+2 minutos:
+
+```sql
+SELECT 'estado ' || e.estado AS evento, e.detectado_en AT TIME ZONE 'Europe/Madrid' AS cuando,
+       (SELECT min(c.calculado_en) FROM plan_calculo c WHERE c.calculado_en >= e.detectado_en) - e.detectado_en
+           AS retraso
+FROM cargador_estado e WHERE e.detectado_en > now() - interval '1 day'
+UNION ALL
+SELECT 'lectura ' || l.pct, l.alta_en AT TIME ZONE 'Europe/Madrid',
+       (SELECT min(c.calculado_en) FROM plan_calculo c WHERE c.calculado_en >= l.alta_en) - l.alta_en
+FROM bateria_lectura l WHERE l.alta_en > now() - interval '1 day'
+ORDER BY 2;
+```
+
+Sin errores del ciclo, duración y último cálculo:
+
+```sql
+SELECT ultimo_ok_en AT TIME ZONE 'Europe/Madrid', ultimo_error_en, ultimo_error FROM planificador_ciclo;
+SELECT max(duracion_ms), avg(duracion_ms) FROM plan_calculo WHERE ahora > now() - interval '1 day';
+```
+
+Muestreo igual que antes: mayor hueco entre muestras en las últimas 24 h
+(como antes: 60 s, con algún hueco de unos 70 s cada 2 h) y
+`cargador estado`:
+
+```sql
+SELECT max(d) AS mayor_hueco, count(*) FILTER (WHERE d > interval '180 seconds') AS huecos_de_mas_de_180_s
+FROM (SELECT instante - lag(instante) OVER (ORDER BY instante) AS d
+      FROM cargador_muestra WHERE instante > now() - interval '24 hours') x;
+```

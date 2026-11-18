@@ -621,7 +621,9 @@ Entre 3b y 3c, al menos una semana en sombra revisando el plan y el ahorro.
 
 1. Paso 3.0, pruebas del cargador: hecho (17 y 18/11/2026; E3.1 y
    viaris-api.md).
-2. Paso 3a, en curso (plan aprobado el 18/11/2026). Primera entrega:
+2. Paso 3a (v0.6.0, plan aprobado el 18/11/2026; algoritmo y simular dados
+   por buenos el 18/11). Pendiente: desplegar y aceptar en el NAS (criterios
+   de docs/tareas/etapa-3-planificador.md). Primera entrega:
    migración 0020 (parámetros agrupados y claves nuevas, `planificador_modo`,
    `planificador_config`, tablas del plan con los choques con tareas ajenas,
    solicitud y ciclo, entradas en
