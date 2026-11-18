@@ -443,8 +443,15 @@ class _Planificador:
             choques = self._choques(inicio, fin)
             if en_curso and choques and self.e.respetar_ajenas:
                 self.avisos.append(f"La tarea ajena {', '.join(map(str, choques))} pisa la franja en curso.")
+            por_nivel: dict[tuple[str, datetime | None], Decimal] = {}
+            for c in qs:
+                por_nivel[(c.nivel, c.salida)] = por_nivel.get((c.nivel, c.salida), CERO) + c.kwh
+            maximo = datetime.max.replace(tzinfo=inicio.tzinfo)
+            desglose = tuple((n, s, k) for (n, s), k in sorted(por_nivel.items(),
+                                                                key=lambda x: (PRIORIDAD[x[0][0]], x[0][1] or maximo)))
             lista.append(Franja(inicio, fin, principal.nivel, principal.salida, sum((c.kwh for c in qs), CERO),
-                                any(c.provisional for c in qs), fr.num_tareas(inicio, fin), en_curso, choques))
+                                any(c.provisional for c in qs), fr.num_tareas(inicio, fin), en_curso, choques,
+                                desglose))
         salidas_plan = []
         for s in self.e.salidas:
             nivel = self.nivel_en(s.instante)

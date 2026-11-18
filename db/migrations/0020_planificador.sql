@@ -416,10 +416,16 @@ JOIN planificador_config c ON c.contrato = p.contrato AND c.fuente = p.fuente;
 
 -- Franjas con su precio medio y su coste previsto (precio del cuarto ×
 -- energía × factor_contador, como v_coste_tramo). Sin precio en algún cuarto,
--- precio y coste quedan sin valor.
+-- precio y coste quedan sin valor. Desglose por nivel de sus cuartos (kWh del
+-- contador): una franja puede juntar necesaria, margen y oportunista;
+-- salidas_necesaria, las salidas a las que sirve su parte necesaria.
 CREATE VIEW v_plan_franja AS
 SELECT f.calculo_id, f.n, f.inicio, f.fin, f.motivo, f.salida, f.kwh_cargador, f.provisional, f.tareas,
        f.en_curso, f.choca_con,
+       coalesce(sum(q.kwh_cargador) FILTER (WHERE q.nivel = 'necesaria'), 0) AS necesaria_kwh,
+       coalesce(sum(q.kwh_cargador) FILTER (WHERE q.nivel = 'margen'), 0) AS margen_kwh,
+       coalesce(sum(q.kwh_cargador) FILTER (WHERE q.nivel = 'oportunista'), 0) AS oportunista_kwh,
+       array_agg(DISTINCT q.salida ORDER BY q.salida) FILTER (WHERE q.nivel = 'necesaria') AS salidas_necesaria,
        CASE WHEN bool_and(q.precio_eur_kwh IS NOT NULL) THEN
            sum(q.kwh_cargador * q.precio_eur_kwh) / nullif(sum(q.kwh_cargador), 0) END AS precio_medio_eur_kwh,
        CASE WHEN bool_and(q.precio_eur_kwh IS NOT NULL AND fc.valor IS NOT NULL) THEN
@@ -454,8 +460,10 @@ WHERE q.inicio >= c.ahora AND (c.siguiente IS NULL OR q.inicio < c.siguiente);
 -- de cada conexión cerrada posterior al primer cálculo:
 --   real: E de cada cuarto a su precio;
 --   plan: E repartida en orden de hora en los cuartos del plan efectivo
---         dentro de la conexión y, si no basta, en los primeros cuartos
---         libres de la conexión a la potencia de carga;
+--         dentro de la conexión (plan propio) y, si no basta, el resto en
+--         los cuartos libres más baratos de la conexión a la potencia de
+--         carga (lo que habría hecho el planificador de saber que hacía
+--         falta); plan propio y resto van también por separado;
 --   referencia: E desde el enchufe a la potencia de carga.
 -- Coste = kWh × factor_contador × precio final (como v_coste_tramo).
 -- Cuartos partidos por el enchufe o la desconexión: capacidad proporcional.
@@ -496,7 +504,8 @@ WITH primero AS (
            sum(d.e_kwh) OVER (PARTITION BY d.con_inicio) AS e_total,
            coalesce(d.plan_cap, d.libre_cap) AS cap_plan,
            sum(coalesce(d.plan_cap, d.libre_cap))
-               OVER (PARTITION BY d.con_inicio ORDER BY d.plan_cap IS NULL, d.q) AS cum_plan,
+               OVER (PARTITION BY d.con_inicio
+                     ORDER BY d.plan_cap IS NULL, CASE WHEN d.plan_cap IS NULL THEN d.precio END, d.q) AS cum_plan,
            sum(d.libre_cap) OVER (PARTITION BY d.con_inicio ORDER BY d.q) AS cum_ref
     FROM d
 ), reparto AS (
@@ -511,7 +520,8 @@ SELECT r.con_inicio AS inicio,
        r.energia_cargador_kwh,
        r.energia_kwh, r.plan_kwh, r.plan_kwh >= r.energia_cargador_kwh AS plan_cubre,
        r.referencia_kwh < r.energia_cargador_kwh AS referencia_incompleta,
-       r.coste_real_eur, r.coste_plan_eur, r.coste_referencia_eur,
+       r.plan_propio_kwh, r.resto_kwh,
+       r.coste_real_eur, r.coste_plan_eur, r.coste_plan_propio_eur, r.coste_resto_eur, r.coste_referencia_eur,
        r.coste_referencia_eur - r.coste_plan_eur AS ahorro_plan_eur,
        r.coste_referencia_eur - r.coste_real_eur AS ahorro_real_eur,
        r.sin_precio
@@ -519,6 +529,8 @@ FROM (
     SELECT x.con_inicio, x.con_fin,
            max(x.e_total) AS energia_cargador_kwh,
            coalesce(sum(x.plan_cap), 0) AS plan_kwh,
+           coalesce(sum(x.e_plan) FILTER (WHERE x.plan_cap IS NOT NULL), 0) AS plan_propio_kwh,
+           coalesce(sum(x.e_plan) FILTER (WHERE x.plan_cap IS NULL), 0) AS resto_kwh,
            sum(x.e_ref) AS referencia_kwh,
            bool_or(x.precio IS NULL OR x.factor IS NULL) AS sin_precio,
            CASE WHEN bool_and(x.factor IS NOT NULL) THEN sum(x.e_kwh * x.factor) END AS energia_kwh,
@@ -527,6 +539,12 @@ FROM (
            CASE WHEN bool_and(x.precio IS NOT NULL AND x.factor IS NOT NULL) THEN
                sum(x.e_plan * x.factor * x.precio) END AS coste_plan_eur,
            CASE WHEN bool_and(x.precio IS NOT NULL AND x.factor IS NOT NULL) THEN
+               coalesce(sum(x.e_plan * x.factor * x.precio) FILTER (WHERE x.plan_cap IS NOT NULL), 0)
+           END AS coste_plan_propio_eur,
+           CASE WHEN bool_and(x.precio IS NOT NULL AND x.factor IS NOT NULL) THEN
+               coalesce(sum(x.e_plan * x.factor * x.precio) FILTER (WHERE x.plan_cap IS NULL), 0)
+           END AS coste_resto_eur,
+           CASE WHEN bool_and(x.precio IS NOT NULL AND x.factor IS NOT NULL) THEN
                sum(x.e_ref * x.factor * x.precio) END AS coste_referencia_eur
     FROM reparto x
     GROUP BY x.con_inicio, x.con_fin
@@ -534,7 +552,8 @@ FROM (
 
 COMMENT ON VIEW v_plan_ahorro IS
     'E3.8 por conexión cerrada: coste real, del plan efectivo y de cargar al enchufar, con la misma energía. '
-    'sin_precio: algún cuarto sin precio o sin factor_contador (los costes salen sin valor).';
+    'coste_plan = plan propio (cuartos del plan efectivo) + resto (energía real que el plan no tenía, en los '
+    'cuartos libres más baratos). sin_precio: algún cuarto sin precio o sin factor_contador (costes sin valor).';
 
 -- --- 7. Permisos -----------------------------------------------------------------------------
 

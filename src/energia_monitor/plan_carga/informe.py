@@ -17,6 +17,11 @@ def _t(instante: datetime) -> str:
     return f"{DIAS[local.weekday()]} {local:%d/%m %H:%M}"
 
 
+def desglose(f: Franja) -> str:
+    """«necesaria 8,0 · mar 09:30 / oportunista 24,7» (kWh del contador por nivel, maqueta 01d)."""
+    return " / ".join(f"{n} {_n(k)}" + (f" · {_t(s)}" if s else "") for n, s, k in f.desglose)
+
+
 def _n(x: Decimal | None, decimales: int = 1) -> str:
     return "—" if x is None else f"{x:.{decimales}f}".replace(".", ",")
 
@@ -58,12 +63,12 @@ def lineas_plan(e: Entrada, ctx: Contexto, plan: Plan, milisegundos: Decimal) ->
         precio, euros = coste_franja(plan, f, ctx.factor_contador)
         total_kwh += f.kwh
         total_eur += euros or 0
-        motivo = f.motivo + (f" ({_t(f.salida)})" if f.salida else "")
         marcas = [m for m, si in (("en curso", f.en_curso), ("provisional", f.provisional),
                                   (f"{f.tareas} tareas", f.tareas > 1),
                                   (f"choca con {', '.join(map(str, f.choca_con))}", bool(f.choca_con))) if si]
-        lineas.append(f"  {_t(f.inicio)} – {f.fin.astimezone(MADRID):%H:%M}  {motivo:<26} {_n(f.kwh):>5} kWh"
+        lineas.append(f"  {_t(f.inicio)} – {f.fin.astimezone(MADRID):%H:%M}  {_n(f.kwh):>5} kWh"
                       f"  {_n(precio, 4)} €/kWh  {_n(euros, 2)} €" + (f"  [{', '.join(marcas)}]" if marcas else ""))
+        lineas.append(f"      {desglose(f)}")
     if not plan.franjas:
         lineas.append("  ninguna")
     else:
@@ -73,22 +78,53 @@ def lineas_plan(e: Entrada, ctx: Contexto, plan: Plan, milisegundos: Decimal) ->
     return lineas
 
 
+def _franjas(plan: Plan, factor: Decimal | None) -> list[str]:
+    lineas = []
+    for f in plan.franjas:
+        precio, euros = coste_franja(plan, f, factor)
+        marcas = [m for m, si in (("en curso", f.en_curso), ("provisional", f.provisional),
+                                  (f"{f.tareas} tareas", f.tareas > 1)) if si]
+        lineas.append(f"  {_t(f.inicio)} – {f.fin.astimezone(MADRID):%H:%M}  {_n(f.kwh):>5} kWh"
+                      f"  {_n(precio, 4)} €/kWh  {_n(euros, 2)} €" + (f"  [{', '.join(marcas)}]" if marcas else ""))
+        lineas.append(f"      {desglose(f)}")
+    return lineas or ["  ninguna"]
+
+
 def lineas_simulacion(s: Simulacion) -> list[str]:
-    lineas = lineas_plan(s.entrada, s.contexto, s.plan, s.milisegundos)
-    if s.conexion is None or s.ahorro is None:
+    lineas = ["== Plan al enchufar", *lineas_plan(s.entrada, s.contexto, s.plan, s.milisegundos)]
+    if s.conexion is None or s.ahorro is None or s.efectivo is None:
         return [*lineas, "Sin conexión que contenga ese instante: no hay comparación."]
     a = s.ahorro
     inicio, fin = s.conexion
-    lineas.append(f"Conexión {_t(inicio)} – {_t(fin)}" + (" (aún abierta: hasta la última muestra)" if s.abierta else "")
+    motivos: dict[str, int] = {}
+    for _, m in s.calculos[1:]:
+        clave = "estado" if m.startswith("estado") else m
+        motivos[clave] = motivos.get(clave, 0) + 1
+    resumen = ", ".join(f"{m} {n}" for m, n in sorted(motivos.items()))
+    lineas += [
+        f"== Ciclo de sombra: {len(s.calculos)} cálculos hasta {_t(fin)} ({resumen}); el más lento, {s.milisegundos} ms",
+        "== Plan efectivo en la conexión (cada cuarto según el último cálculo anterior):",
+        *_franjas(s.efectivo, s.contexto.factor_contador),
+    ]
+    if s.final is not None:
+        cuando = "en la última muestra" if s.abierta else "al desconectar"
+        lineas += [f"== Plan {cuando} ({_t(s.calculos[-1][0])}):", *_franjas(s.final, s.contexto.factor_contador)]
+    lineas.append(f"== Conexión {_t(inicio)} – {_t(fin)}" + (" (aún abierta: hasta la última muestra)" if s.abierta else "")
                   + f": {_n(a.energia_cargador_kwh, 2)} kWh medidos por el cargador")
     if a.sin_precio:
         return [*lineas, "  Falta el precio o factor_contador de algún cuarto: sin costes."]
-    for nombre, euros in (("real", a.coste_real_eur), ("plan", a.coste_plan_eur),
-                          ("referencia", a.coste_referencia_eur)):
-        medio = euros / a.energia_cargador_kwh if euros is not None and a.energia_cargador_kwh else None
-        lineas.append(f"  {nombre:<11} {_n(euros, 2):>7} €  ({_n(medio, 4)} €/kWh del contador)")
-    if not a.plan_cubre:
-        lineas.append(f"  el plan tenía {_n(a.plan_kwh, 2)} kWh: el resto, en los primeros cuartos libres")
+
+    def fila(nombre: str, kwh: Decimal, euros: Decimal | None) -> str:
+        medio = euros / kwh if euros is not None and kwh else None
+        return f"  {nombre:<28} {_n(kwh, 2):>6} kWh {_n(euros, 2):>7} €  ({_n(medio, 4)} €/kWh del contador)"
+
+    lineas += [
+        fila("real", a.energia_cargador_kwh, a.coste_real_eur),
+        fila("plan", a.energia_cargador_kwh, a.coste_plan_eur),
+        fila("  plan propio", a.plan_propio_kwh, a.coste_plan_propio_eur),
+        fila("  resto (libres más baratos)", a.resto_kwh, a.coste_resto_eur),
+        fila("referencia (al enchufar)", a.energia_cargador_kwh, a.coste_referencia_eur),
+    ]
     if a.coste_referencia_eur is not None and a.coste_plan_eur is not None and a.coste_real_eur is not None:
         lineas.append(f"  ahorro frente a la referencia: plan {_n(a.coste_referencia_eur - a.coste_plan_eur, 2)} €,"
                       f" real {_n(a.coste_referencia_eur - a.coste_real_eur, 2)} €")

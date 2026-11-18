@@ -121,6 +121,9 @@ class Franja:
     tareas: int
     en_curso: bool
     choca_con: tuple[int, ...] = ()
+    # kWh del contador por (nivel, salida), por prioridad y salida: («necesaria», jue 09:30, 8,0),
+    # («oportunista», None, 24,7). motivo es el primero.
+    desglose: tuple[tuple[str, datetime | None, Decimal], ...] = ()
 
 
 @dataclass(frozen=True)

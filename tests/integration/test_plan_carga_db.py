@@ -276,10 +276,17 @@ def referencia(conn: psycopg.Connection, inicio: datetime, fin: datetime, energi
 
 
 def comparar(fila: tuple, esperado) -> None:  # type: ignore[no-untyped-def]
-    (energia, plan, cubre, ref_incompleta, real, coste_plan, coste_ref, sin_precio) = fila
+    (energia, plan, cubre, ref_incompleta, real, coste_plan, coste_ref, sin_precio,
+     propio, resto, coste_propio, coste_resto) = fila
     tol = D("1e-9")
     assert abs(energia - esperado.energia_cargador_kwh) < tol
     assert abs(plan - esperado.plan_kwh) < tol
+    assert abs(propio - esperado.plan_propio_kwh) < tol and abs(resto - esperado.resto_kwh) < tol
+    assert abs(propio + resto - energia) < tol
+    if not esperado.sin_precio:
+        assert abs(coste_propio - esperado.coste_plan_propio_eur) < tol
+        assert abs(coste_resto - esperado.coste_resto_eur) < tol
+        assert abs(coste_propio + coste_resto - coste_plan) < tol
     assert cubre == esperado.plan_cubre
     assert ref_incompleta == (esperado.referencia_kwh < esperado.energia_cargador_kwh - tol)
     assert sin_precio == esperado.sin_precio
@@ -289,7 +296,8 @@ def comparar(fila: tuple, esperado) -> None:  # type: ignore[no-untyped-def]
 
 
 CONSULTA_AHORRO = ("SELECT energia_cargador_kwh, plan_kwh, plan_cubre, referencia_incompleta, coste_real_eur,"
-                   " coste_plan_eur, coste_referencia_eur, sin_precio FROM v_plan_ahorro WHERE inicio = %s")
+                   " coste_plan_eur, coste_referencia_eur, sin_precio, plan_propio_kwh, resto_kwh,"
+                   " coste_plan_propio_eur, coste_resto_eur FROM v_plan_ahorro WHERE inicio = %s")
 
 
 def test_ahorro_noche_del_cambio_de_hora(conn: psycopg.Connection, limpio: None) -> None:
@@ -346,7 +354,7 @@ def test_ahorro_aleatorio(conn: psycopg.Connection, limpio: None, semilla: int) 
     fila = conn.execute(CONSULTA_AHORRO, (inicio.replace(microsecond=0),)).fetchone()
     assert fila is not None
     if esperado.sin_precio:
-        assert fila[4:7] == (None, None, None) and fila[7] is True
+        assert fila[4:7] == (None, None, None) and fila[7] is True and fila[10:] == (None, None)
     else:
         comparar(fila, esperado)
 
@@ -373,3 +381,26 @@ def test_cli_hora_en_hhmm(conn: psycopg.Connection, nombre_bd: str, monkeypatch:
                      " AND lower(vigencia) = '2031-01-01'")
         conn.execute("UPDATE bateria_parametro SET vigencia = daterange(lower(vigencia), NULL, '[)')"
                      " WHERE clave = 'hora_publicacion_precios' AND upper(vigencia) = '2031-01-01'")
+
+
+def test_resto_en_los_cuartos_libres_mas_baratos(conn: psycopg.Connection, limpio: None) -> None:
+    """El plan tenía 1 kWh y se cargaron 3: los 2 que faltan van a los cuartos libres más baratos, no a los
+    primeros desde el enchufe; plan propio y resto, aparte."""
+    rng = random.Random(1)
+    mercado(conn, [date(2026, 11, 2), date(2026, 11, 3)], rng)
+    inicio, fin = utc("2026-11-02T18:00"), utc("2026-11-02T20:00")
+    estados(conn, [("2026-11-02T08:00", 1), ("2026-11-02T18:00", 4), ("2026-11-02T20:00", 2)])
+    cuartos = [inicio + i * CUARTO for i in range(8)]
+    calculo(conn, utc("2026-11-02T17:00"), {cuartos[0]: D(1)})
+    energia = {q: D(375) for q in cuartos}  # 3 kWh
+    tramos(conn, energia)
+    precio = {q: p for q, p in conn.execute("SELECT inicio, precio_final_eur_kwh FROM v_plan_precio")}
+    fila = conn.execute(CONSULTA_AHORRO, (inicio,)).fetchone()
+    assert fila is not None
+    esperado = referencia(conn, inicio, fin, energia, {})
+    comparar(fila, esperado)
+    assert (esperado.plan_propio_kwh, esperado.resto_kwh) == (D(1), D(2))
+    libres = sorted(cuartos[1:], key=lambda q: precio[q])
+    # 2 kWh a 4,5 kW: un cuarto entero (1,125) y 0,875 del siguiente más barato.
+    coste_resto = (D("1.125") * precio[libres[0]] + D("0.875") * precio[libres[1]]) * D("0.96")
+    assert abs(esperado.coste_resto_eur - coste_resto) < D("1e-12")  # type: ignore[operator]

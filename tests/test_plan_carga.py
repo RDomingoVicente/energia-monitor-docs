@@ -249,6 +249,17 @@ def test_huecos_hasta_caber_en_las_tareas() -> None:
     assert [(f.inicio, f.fin) for f in plan.franjas] == [(T0, T0 + 3 * CUARTO), (T0 + 4 * CUARTO, T0 + 7 * CUARTO)]
 
 
+def test_franja_mixta_lleva_el_desglose_por_nivel() -> None:
+    plan = planificar(entrada([0.01, 0.02, 0.03, 0.04, 0.50], salidas=[(5, 51, 1)], nivel=50, umbral=0.10,
+                              parametros=params(margen_carga_pct=D(100), carga_oportunista=True,
+                                                nivel_oportunista_kwh=D(54))))
+    salida = T0 + 5 * CUARTO
+    assert len(plan.franjas) == 1
+    f = plan.franjas[0]
+    assert (f.motivo, f.salida, f.kwh) == ("necesaria", salida, D(4))
+    assert f.desglose == (("necesaria", salida, D(1)), ("margen", salida, D(1)), ("oportunista", None, D(2)))
+
+
 def test_hueco_entre_franjas_necesarias_que_acaban_en_oportunista() -> None:
     # Necesaria en 0 y 3; oportunista en 1 (barato). Para caber en una tarea hay que cerrar el hueco caro (2):
     # toma el nivel principal de la franja (necesaria), no el de su último cuarto (oportunista).

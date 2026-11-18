@@ -4,8 +4,9 @@ Con la energía real E (contador del cargador) de una conexión:
 
 - real: la energía de cada cuarto a su precio;
 - plan: E repartida en orden de hora en los cuartos del plan efectivo dentro
-  de la conexión y, si no basta, en los primeros cuartos libres de la
-  conexión a la potencia de carga;
+  de la conexión (plan propio) y, si no basta, el resto en los cuartos libres
+  más baratos de la conexión a la potencia de carga (lo que habría hecho el
+  planificador de saber que hacía falta). Plan propio y resto, también aparte;
 - referencia: E desde el enchufe a la potencia de carga.
 
 Coste = kWh × factor_contador × precio final. En los cuartos partidos por el
@@ -34,10 +35,14 @@ def cuarto_de(instante: datetime) -> datetime:
 @dataclass(frozen=True)
 class Ahorro:
     energia_cargador_kwh: Decimal
-    plan_kwh: Decimal
+    plan_kwh: Decimal  # capacidad de los cuartos del plan dentro de la conexión
+    plan_propio_kwh: Decimal  # parte de E en los cuartos del plan
+    resto_kwh: Decimal  # parte de E que el plan no tenía (cuartos libres más baratos)
     referencia_kwh: Decimal
     coste_real_eur: Decimal | None
-    coste_plan_eur: Decimal | None
+    coste_plan_eur: Decimal | None  # propio + resto
+    coste_plan_propio_eur: Decimal | None
+    coste_resto_eur: Decimal | None
     coste_referencia_eur: Decimal | None
     sin_precio: bool
 
@@ -76,7 +81,9 @@ def ahorro_conexion(
     libre = {q: potencia_kw[q.astimezone(MADRID).hour] * h for q, h in cuartos}
     plan_cap = {q: plan_kwh[q] * h / Decimal("0.25") for q, h in cuartos if q in plan_kwh}
 
-    orden_plan = [q for q, _ in cuartos if q in plan_cap] + [q for q, _ in cuartos if q not in plan_cap]
+    libres = sorted((q for q, _ in cuartos if q not in plan_cap),
+                    key=lambda q: (precio.get(q) is None, precio.get(q, Decimal(0)), q))
+    orden_plan = [q for q, _ in cuartos if q in plan_cap] + libres
     e_plan = dict(zip(orden_plan, _repartir([plan_cap.get(q, libre[q]) for q in orden_plan], total), strict=True))
     orden_ref = [q for q, _ in cuartos]
     e_ref = dict(zip(orden_ref, _repartir([libre[q] for q in orden_ref], total), strict=True))
@@ -84,17 +91,24 @@ def ahorro_conexion(
     factores = {q: factor(q.astimezone(MADRID).date()) for q, _ in cuartos}
     sin_precio = any(q not in precio or factores[q] is None for q, _ in cuartos)
 
-    def coste(e: Mapping[datetime, Decimal]) -> Decimal | None:
+    def coste(e: Mapping[datetime, Decimal], solo: set[datetime] | None = None) -> Decimal | None:
         if sin_precio:
             return None
-        return sum((e[q] * factores[q] * precio[q] for q, _ in cuartos), Decimal(0))  # type: ignore[operator]
+        return sum((e[q] * factores[q] * precio[q] for q, _ in cuartos  # type: ignore[operator]
+                    if solo is None or q in solo), Decimal(0))
+
+    propios = set(plan_cap)
 
     return Ahorro(
         energia_cargador_kwh=total,
         plan_kwh=sum(plan_cap.values(), Decimal(0)),
+        plan_propio_kwh=sum((e for q, e in e_plan.items() if q in propios), Decimal(0)),
+        resto_kwh=sum((e for q, e in e_plan.items() if q not in propios), Decimal(0)),
         referencia_kwh=sum(e_ref.values(), Decimal(0)),
         coste_real_eur=coste(e_kwh),
         coste_plan_eur=coste(e_plan),
+        coste_plan_propio_eur=coste(e_plan, propios),
+        coste_resto_eur=coste(e_plan, set(libres)),
         coste_referencia_eur=coste(e_ref),
         sin_precio=sin_precio,
     )

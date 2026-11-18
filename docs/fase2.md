@@ -641,7 +641,8 @@ Entre 3b y 3c, al menos una semana en sombra revisando el plan y el ahorro.
    reintenta), solicitudes de recálculo (`bateria_servicio.recalcular`, es
    decir, lecturas, excepciones, horario, cargas externas y parámetros, y
    `db.refrescar_precio_final`, precios nuevos) y CLI `planificador plan` y
-   `planificador simular`. Medido en local: lectura de la entrada 0,12 s y
+   `planificador simular`. Probado con un volcado de producción
+   restaurado en local (noches del 14 al 18/11). Medido en local: lectura de la entrada 0,12 s y
    algoritmo 0,03 s con 72 h de horizonte y 3 salidas; 0,15 s en un caso de
    estrés de 288 cuartos disponibles. Pendiente: `simular` con los datos
    reales (volcado de producción) y la aceptación en el NAS.
@@ -896,8 +897,12 @@ Control desde el formulario:
   energía real E medida en esa conexión en los tres casos:
   1. real: el coste de lo cargado (`v_coste_tramo`);
   2. plan: E repartida en orden de hora en los cuartos del plan efectivo
-     dentro de la conexión; si el plan tenía menos que E, el resto se carga
-     en los primeros cuartos libres de la conexión, como la referencia;
+     dentro de la conexión (plan propio); si el plan tenía menos que E, el
+     resto se carga en los cuartos libres más baratos de la conexión (lo que
+     habría hecho el planificador de saber que hacía falta). El plan propio
+     y el resto se muestran también por separado (kWh y coste), para
+     distinguir el ahorro del plan del que sale de esa suposición
+     (revisión del 18/11/2026);
   3. referencia: E desde el enchufe, a la potencia de carga (E3.2).
 - Todo en SQL con `numeric`, con el precio de `planificador_config` y
   `factor_contador`, como `v_coste_tramo`.
@@ -1026,9 +1031,22 @@ código.
   tras refrescar los precios). En 3c quien escribe en el cargador es un único
   proceso, el que ya tiene el cliente. Un fallo del planificador no detiene
   el muestreo.
-- `planificador simular` mira hacia atrás con los datos de hoy: el nivel está
-  reconciliado con lecturas posteriores y el horario no tiene historial (se
-  usa el actual).
+- `planificador simular` repite el ciclo de sombra desde el enchufe hasta la
+  desconexión (o la última muestra, si sigue enchufado): un cálculo cada 15
+  minutos y en cada evento que vería el servicio (publicación de precios a
+  `hora_publicacion_precios`, cambio de estado, lectura, desconexión),
+  conservando la franja en curso, y compara el plan efectivo, igual que
+  `v_plan_ahorro` (revisión del 18/11/2026). Mira hacia atrás con los datos
+  de hoy: el nivel está reconciliado con lecturas posteriores y el horario
+  no tiene historial (se usa el actual). En sombra el nivel de cada cálculo
+  incluye la carga real de esa noche (las tareas de la app): la necesaria del
+  plan efectivo baja a medida que carga el coche y el resto pasa a
+  oportunista.
+- Cada franja lleva su desglose por nivel (kWh del contador): necesaria con
+  su salida, margen y oportunista («necesaria 8,0 · mar 09:30 /
+  oportunista 24,7», maqueta 01d). `v_plan_franja` lo deriva de
+  `plan_cuarto` (`necesaria_kwh`, `margen_kwh`, `oportunista_kwh`,
+  `salidas_necesaria`).
 - Algoritmo (`plan_carga/algoritmo.py`, función pura `planificar`):
   - Nivel 1 por salidas en orden: para cada una, los cuartos más baratos que
     terminan antes de la salida − margen (para la próxima, primero la

@@ -76,7 +76,10 @@ def _en_curso(conn: psycopg.Connection, instante: datetime) -> FranjaEnCurso | N
     return FranjaEnCurso(fila[1], fila[2], cuartos) if cuartos else None
 
 
-def cargar_entrada(conn: psycopg.Connection, ahora: datetime, *, con_en_curso: bool = True,
+DESDE_BD = "bd"  # la franja en curso sale del último cálculo guardado
+
+
+def cargar_entrada(conn: psycopg.Connection, ahora: datetime, *, en_curso: FranjaEnCurso | None | str = DESDE_BD,
                    ocupados: Sequence[Ocupado] = (), respetar_ajenas: bool = False) -> tuple[Entrada, Contexto]:
     p = parametros_vigentes(conn, ahora)
     estado = conn.execute("SELECT capacidad_kwh, nivel_plan_kwh FROM bateria_estado(%s)", (ahora,)).fetchone()
@@ -128,7 +131,8 @@ def cargar_entrada(conn: psycopg.Connection, ahora: datetime, *, con_en_curso: b
         conectado=_conectado(conn, ahora), prudente=dias < int(p["historial_min_disponibilidad_dias"]),
         umbral=umbral, cuartos=tuple(cuartos), salidas=salidas,
         horizonte_fin=horizonte_fin, ocupados=tuple(ocupados),
-        en_curso=_en_curso(conn, ahora) if con_en_curso else None, respetar_ajenas=respetar_ajenas)
+        en_curso=_en_curso(conn, ahora) if en_curso == DESDE_BD else en_curso,  # type: ignore[arg-type]
+        respetar_ajenas=respetar_ajenas)
     return entrada, Contexto(modo, dias, capacidad, factor[0] if factor else None, nivel is None)
 
 
@@ -257,15 +261,46 @@ class Ciclo:
 # --- Simulación sobre un día pasado -------------------------------------------------------------
 
 
+def en_curso_de(plan: Plan, instante: datetime) -> FranjaEnCurso | None:
+    """Franja de un plan (en memoria) que contiene el instante, con sus cuartos."""
+    for f in plan.franjas:
+        if f.inicio <= instante < f.fin:
+            return FranjaEnCurso(f.inicio, f.fin, tuple(c for c in plan.cuartos if f.inicio <= c.inicio < f.fin))
+    return None
+
+
+def plan_de_cuartos(cuartos: Sequence[CuartoPlan]) -> Plan:
+    """Franjas (contiguas) con su desglose por nivel a partir de cuartos sueltos, p. ej. el plan efectivo."""
+    from energia_monitor.plan_carga import franjas as fr
+    from energia_monitor.plan_carga.modelo import PRIORIDAD, Franja
+
+    por_inicio = {c.inicio: c for c in cuartos}
+    lista = []
+    for inicio, fin in fr.agrupar(por_inicio):
+        qs = [por_inicio[q] for q in sorted(por_inicio) if inicio <= q < fin]
+        maximo = datetime.max.replace(tzinfo=inicio.tzinfo)
+        por_nivel: dict[tuple[str, datetime | None], Decimal] = {}
+        for c in qs:
+            por_nivel[(c.nivel, c.salida)] = por_nivel.get((c.nivel, c.salida), Decimal(0)) + c.kwh
+        desglose = tuple((n, s, k) for (n, s), k in sorted(por_nivel.items(),
+                                                            key=lambda x: (PRIORIDAD[x[0][0]], x[0][1] or maximo)))
+        lista.append(Franja(inicio, fin, desglose[0][0], desglose[0][1], sum((c.kwh for c in qs), Decimal(0)),
+                            any(c.provisional for c in qs), fr.num_tareas(inicio, fin), False, (), desglose))
+    return Plan(tuple(por_inicio[q] for q in sorted(por_inicio)), tuple(lista), ())
+
+
 @dataclass(frozen=True)
 class Simulacion:
-    entrada: Entrada
+    entrada: Entrada  # del primer cálculo (al enchufar o en --desde)
     contexto: Contexto
-    plan: Plan
-    milisegundos: Decimal
+    plan: Plan  # primer cálculo
+    milisegundos: Decimal  # el cálculo más lento
     conexion: tuple[datetime, datetime] | None
     ahorro: Ahorro | None
     abierta: bool = False  # conexión aún abierta: se compara hasta la última muestra
+    calculos: tuple[tuple[datetime, str], ...] = ()  # (instante, motivo) de cada recálculo
+    efectivo: Plan | None = None  # plan efectivo dentro de la conexión
+    final: Plan | None = None  # último cálculo (al desconectar, o en la última muestra)
 
 
 def instante_de_simulacion(conn: psycopg.Connection, dia: date, desde: str | None) -> datetime | None:
@@ -279,21 +314,67 @@ def instante_de_simulacion(conn: psycopg.Connection, dia: date, desde: str | Non
     return fila[0] if fila else None
 
 
+def _eventos(conn: psycopg.Connection, desde: datetime, hasta: datetime, desconexion: bool) -> list[tuple[datetime, str]]:
+    """Los recálculos por evento que haría el servicio entre desde y hasta (excluidos)."""
+    eventos = [(t, f"estado {e}") for t, e in conn.execute(
+        "SELECT detectado_en, estado FROM cargador_estado WHERE detectado_en > %s AND detectado_en < %s",
+        (desde, hasta))]
+    eventos += [(t, "lectura") for (t,) in conn.execute(
+        "SELECT instante FROM bateria_lectura WHERE anulada_en IS NULL AND instante > %s AND instante < %s",
+        (desde, hasta))]
+    dia = desde.astimezone(MADRID).date()
+    while dia <= hasta.astimezone(MADRID).date():
+        minutos = int(parametros_vigentes(conn, desde)["hora_publicacion_precios"])
+        t = datetime(dia.year, dia.month, dia.day, minutos // 60, minutos % 60, tzinfo=MADRID).astimezone(UTC)
+        if desde < t < hasta:
+            eventos.append((t, "publicación de precios"))
+        dia += timedelta(days=1)
+    if desconexion:
+        eventos.append((hasta, "desconexión"))
+    return sorted(eventos)
+
+
 def simular(conn: psycopg.Connection, ahora: datetime) -> Simulacion:
-    """Plan calculado en `ahora` (sin la franja en curso de cálculos guardados) y su ahorro en la conexión
-    que contiene ese instante, con la referencia en Python de v_plan_ahorro. No guarda nada."""
-    entrada, ctx, plan, ms = calcular(conn, ahora, con_en_curso=False)
+    """Repite el ciclo de sombra desde `ahora` hasta la desconexión (o la última muestra, si la conexión sigue
+    abierta): un cálculo cada 15 minutos y en cada evento, conservando la franja en curso del cálculo anterior.
+    Compara el plan efectivo (cada cuarto según el último cálculo anterior a su inicio) con lo real y con cargar
+    al enchufar, con la referencia en Python de v_plan_ahorro. No guarda nada."""
+    entrada, ctx, plan, ms = calcular(conn, ahora, en_curso=None)
     fila = conn.execute("SELECT inicio, fin FROM plan_conexiones(%s, %s) ORDER BY inicio LIMIT 1",
                         (ahora, ahora + timedelta(seconds=1))).fetchone()
     if fila is None:
-        return Simulacion(entrada, ctx, plan, ms, None, None)
+        return Simulacion(entrada, ctx, plan, ms, None, None, calculos=((ahora, "inicio"),))
     inicio, fin = fila
     abierta = fin is None
     if abierta:
         ultima = conn.execute("SELECT max(instante) FROM cargador_muestra").fetchone()
         if ultima is None or ultima[0] is None or ultima[0] <= inicio:
-            return Simulacion(entrada, ctx, plan, ms, None, None)
+            return Simulacion(entrada, ctx, plan, ms, None, None, calculos=((ahora, "inicio"),))
         fin = ultima[0]
+
+    # Ciclo: periódico 15 minutos después del último cálculo; un evento recalcula y reinicia el periodo.
+    calculos: list[tuple[datetime, str, Plan]] = [(ahora, "inicio", plan)]
+    maximo = ms
+    pendientes = _eventos(conn, ahora, fin, desconexion=not abierta)
+    t = ahora
+    while True:
+        periodico = t + PERIODO
+        if pendientes and pendientes[0][0] <= periodico:
+            t, motivo = pendientes.pop(0)
+        elif periodico < fin:
+            t, motivo = periodico, "periódico"
+        else:
+            break
+        _, _, nuevo, ms = calcular(conn, t, en_curso=en_curso_de(calculos[-1][2], t))
+        maximo = max(maximo, ms)
+        calculos.append((t, motivo, nuevo))
+
+    efectivo: dict[datetime, CuartoPlan] = {}
+    for k, (t, _, p) in enumerate(calculos):
+        siguiente = calculos[k + 1][0] if k + 1 < len(calculos) else None
+        for c in p.cuartos:
+            if c.inicio >= t and (siguiente is None or c.inicio < siguiente) and c.inicio < fin:
+                efectivo[c.inicio] = c
     energia = dict(conn.execute("SELECT inicio, coche_wh FROM energia_tramo WHERE inicio >= %s AND inicio < %s",
                                 (cuarto_de(inicio), fin)))
     precio = dict(conn.execute("SELECT inicio, precio_final_eur_kwh FROM v_plan_precio WHERE inicio >= %s"
@@ -303,6 +384,8 @@ def simular(conn: psycopg.Connection, ahora: datetime) -> Simulacion:
         "SELECT d::date, (SELECT valor FROM cargador_parametro WHERE clave = 'factor_contador'"
         " AND vigencia @> d::date) FROM generate_series(%s::date, %s::date, interval '1 day') d",
         (inicio.astimezone(MADRID).date(), fin.astimezone(MADRID).date())))
-    plan_kwh = {c.inicio: c.kwh for c in plan.cuartos}
-    ahorro = ahorro_conexion(inicio, fin, energia, plan_kwh, potencia, precio, factores.get)
-    return Simulacion(entrada, ctx, plan, ms, (inicio, fin), ahorro, abierta)
+    ahorro = ahorro_conexion(inicio, fin, energia, {q: c.kwh for q, c in efectivo.items()}, potencia, precio,
+                             factores.get)
+    return Simulacion(entrada, ctx, plan, maximo, (inicio, fin), ahorro, abierta,
+                      tuple((t, m) for t, m, _ in calculos), plan_de_cuartos(list(efectivo.values())),
+                      calculos[-1][2])

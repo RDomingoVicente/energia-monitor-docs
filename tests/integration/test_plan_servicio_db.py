@@ -157,12 +157,17 @@ def test_guardar_y_vistas(conn: psycopg.Connection, limpio: None) -> None:
         len(plan.cuartos),)
     assert conn.execute("SELECT count(*) FROM plan_salida WHERE calculo_id = %s", (ident,)).fetchone() == (
         len(plan.salidas),)
-    vigente = conn.execute("SELECT inicio, fin, motivo, kwh_cargador, precio_medio_eur_kwh, coste_eur, tareas"
+    vigente = conn.execute("SELECT inicio, fin, motivo, kwh_cargador, precio_medio_eur_kwh, coste_eur, tareas,"
+                           " necesaria_kwh, margen_kwh, oportunista_kwh, salidas_necesaria"
                            " FROM v_plan_vigente ORDER BY n").fetchall()
     assert len(vigente) == len(plan.franjas) >= 1
     for fila, f in zip(vigente, plan.franjas, strict=True):
         precio, coste = informe.coste_franja(plan, f, ctx.factor_contador)
         assert fila[:4] == (f.inicio, f.fin, f.motivo, f.kwh) and fila[6] == f.tareas
+        # Desglose por nivel (derivado de plan_cuarto) igual al de la franja.
+        por_nivel = {n: sum((k for m, _, k in f.desglose if m == n), D(0)) for n in ("necesaria", "margen", "oportunista")}
+        assert fila[7:10] == (por_nivel["necesaria"], por_nivel["margen"], por_nivel["oportunista"])
+        assert fila[10] == (sorted({s for n, s, _ in f.desglose if n == "necesaria"}) or None)
         assert abs(fila[4] - precio) < D("1e-12") and abs(fila[5] - coste) < D("1e-12")  # type: ignore[operator]
     assert conn.execute("SELECT ultimo_calculo_id FROM planificador_ciclo").fetchone() == (ident,)
 
@@ -268,15 +273,41 @@ def test_cli_plan_y_simular(conn: psycopg.Connection, nombre_bd: str, limpio: No
     assert cli.main(["planificador", "plan", "--instante", "2026-11-11 20:00"]) == 0
     salida = capsys.readouterr().out
     assert "Plan a las mié 11/11 20:00 · modo sombra" in salida and "modo prudente" in salida
-    assert "jue 12/11 09:00" in salida and "necesaria (jue 12/11 09:00)" in salida
+    assert "jue 12/11 09:00" in salida and "necesaria 1" in salida and "· jue 12/11 09:00 / margen" in salida
     assert "[se planifica al volver a enchufar]" in salida and "NO CUBIERTA" not in salida
     assert conn.execute("SELECT count(*) FROM plan_calculo").fetchone() == (0,)  # no guarda
 
     assert cli.main(["planificador", "simular", "--dia", "2026-11-11", "--desde", "20:00"]) == 0
     salida = capsys.readouterr().out
-    assert "Conexión mié 11/11 18:00 – jue 12/11 08:30: 13,20 kWh medidos" in salida
-    for nombre in ("real", "plan", "referencia"):
+    assert "== Conexión mié 11/11 18:00 – jue 12/11 08:30: 13,20 kWh medidos" in salida
+    assert "== Ciclo de sombra:" in salida and "desconexión 1" in salida
+    for nombre in ("real", "plan", "  plan propio", "  resto (libres más baratos)", "referencia (al enchufar)"):
         assert f"  {nombre}" in salida
     assert "ahorro frente a la referencia" in salida
     assert cli.main(["planificador", "simular", "--dia", "2026-11-09"]) == 1  # sin enchufe ese día
     assert cli.main(["planificador", "plan", "--instante", "2026-11-11 25:00"]) == 1
+
+
+def test_simular_repite_el_ciclo_de_sombra(conn: psycopg.Connection, limpio: None) -> None:
+    """Enchufe a las 12:00, antes de la publicación (13:30): el primer plan no puede usar la madrugada del
+    jueves (provisional); tras la publicación, el plan efectivo sí. La desconexión recalcula sin ventana."""
+    ahora = local(11, 12)
+    escenario(conn, ahora, pct=60)
+    conn.execute("UPDATE bateria_horario SET hora_salida = '10:00'")
+    conn.execute("INSERT INTO cargador_estado (conector, detectado_en, estado) VALUES ('mennekes', %s, 4)",
+                 (ahora,))
+    conn.execute("INSERT INTO cargador_estado (conector, detectado_en, estado) VALUES ('mennekes', %s, 1)",
+                 (local(12, 9, 10),))
+    conn.execute("SELECT recalcular_bateria(%s)", (local(12, 10),))
+    s = ps.simular(conn, ahora)
+    assert s.conexion == (ahora - timedelta(hours=2), local(12, 9, 10))
+    motivos = [m for _, m in s.calculos]
+    assert motivos[0] == "inicio" and "publicación de precios" in motivos and motivos[-1] == "desconexión"
+    assert (local(11, 13, 30), "publicación de precios") in s.calculos
+    assert all(b - a <= timedelta(minutes=15) for (a, _), (b, _) in zip(s.calculos, s.calculos[1:]))
+    # Antes de las 13:30 la madrugada del jueves es provisional: el primer plan no tiene oportunista en ella.
+    assert not any(c.nivel == "oportunista" and local(12, 0) <= c.inicio < local(12, 7) for c in s.plan.cuartos)
+    assert s.efectivo is not None and any(
+        c.nivel == "oportunista" and local(12, 0) <= c.inicio < local(12, 7) for c in s.efectivo.cuartos)
+    assert all(local(11, 12) <= c.inicio < local(12, 9, 10) for c in s.efectivo.cuartos)
+    assert s.final is not None and s.final.franjas == ()  # al desconectar no queda nada
