@@ -625,6 +625,14 @@ medianoche, la publicación de los precios del día siguiente con su recálculo
 y una desconexión y reconexión del coche. Después, las pruebas de escritura a
 mano y la activación.
 
+Calendario (decisión del 18/11/2026, al revisar la segunda entrega de 3c):
+además de la simulación en seco, **al menos una semana en sombra**. La
+sombra empezó el 18/11 con v0.6.0: no se activa antes del 25/11/2026, y solo
+tras revisar `v_plan_ahorro` de esa semana. Hasta entonces el usuario no
+desactiva sus tareas 5 y 6 ni pasa a activo. La simulación en seco y las
+pruebas de escritura a mano (una a una y en horario barato) sí pueden ir
+antes.
+
 1. Paso 3.0, pruebas del cargador: hecho (17 y 18/11/2026; E3.1 y
    viaris-api.md).
 2. Paso 3a (v0.6.0, plan aprobado el 18/11/2026; algoritmo y simular dados
@@ -669,8 +677,10 @@ mano y la activación.
    pasa a usarla), `plan_franjas_pasadas(desde, hasta)` y
    `bateria_parametro_clave.nota`. Verificado con tests (pantallas contra
    PostgreSQL con `formulario_rw`, `/plan` por debajo de 300 ms) y con
-   Playwright en 1280×900 y 390×844. Pendiente: desplegar y la semana en
-   sombra antes de 3c.
+   Playwright en 1280×900 y 390×844. Desplegado el 18/11/2026.
+4. Paso 3c (v0.7.0, migración 0022): ver «Implementación del paso 3c».
+   Pendiente: simulación en seco en el NAS, pruebas de escritura a mano,
+   tareas 5 y 6 desactivadas en la app y activación.
 
 ### Objetivo
 
@@ -1156,12 +1166,65 @@ Plan aceptado con estas decisiones del usuario:
 - **CLI:** `planificador modo`, `tareas`, `reconciliar --en-seco`,
   `limpiar` (pasa a sombra y borra las propias salvo la guardiana; avisa de
   que con solo la guardiana activa el coche no cargará) y `guardiana --id N`.
-- **Despliegue por pasos** (sustituye a la semana en sombra, E3.11):
+- **Despliegue por pasos** (con la semana en sombra; calendario en E3.11):
   simulación en seco en el NAS (v0.7.0 en sombra, lee el programador y
   registra en la auditoría lo que haría), pruebas de escritura a mano con
   la skill `viaris` (incluido un POST con un id ya ocupado, para ver si
   sobrescribe o da error), el usuario desactiva en la app sus tareas 5 y 6
   sin borrarlas, y activación de día con la primera noche vigilada.
+
+### Implementación del paso 3c
+
+- `viaris.py`: lista cerrada ampliada y `escribir` con validación (ver
+  docs/viaris-api.md, «Uso en el código (etapa 3, paso 3c)»).
+- `plan_carga/reconciliar.py` (puro): de la lectura, las tareas propias y
+  las franjas deseadas saca las operaciones y los avisos.
+- `plan_carga/escritura.py`: lee el programador (`planificador_lectura`),
+  reconcilia y escribe bajo `pg_advisory_lock`; registra la tarea como
+  pendiente antes del POST, confirma con GET y audita. En sombra, todo en
+  seco. Para el plan, `ocupados()` da las tareas ajenas activas (respetadas
+  en activo y pausa; en sombra solo se anotan en `choca_con`), las franjas
+  manuales, los bloqueos (sin energía) y las propias congeladas o en curso
+  (con energía, para no cargar dos veces).
+- `plan_carga/acciones.py`: cola `plan_accion`. El formulario valida (sin
+  solapes con tareas activas, manuales ni propias; franja mínima; máximo de
+  tareas) y encola; el muestreo vuelve a validar y aplica. Modificar y
+  Eliminar de una automática la bloquean hasta su fin original; de una
+  manual, la anulan. Detener desactiva al momento, con un reintento
+  inmediato, y bloquea el resto; si falla, «Reintentar». Cargar ahora:
+  desde ahora hasta el objetivo de la próxima salida (o el nivel
+  oportunista), al menos `franja_min_min`, como mucho 12 h.
+- Muestreo: en cada ciclo, acciones pendientes, plan y, si hay plan nuevo
+  o acciones, reconciliación. Entre ciclos escucha `LISTEN planificador`
+  con una conexión propia; un `NOTIFY` lo despierta al momento.
+- En sombra no se escribe nada en el cargador, tampoco por acción manual:
+  añadir, modificar, eliminar, Detener y Cargar ahora aparecen desactivados
+  («Cambia a activo para usarlo»), el formulario responde 409 y el muestreo
+  las rechaza al procesar. Las únicas escrituras posibles en sombra son las
+  del CLI con `--confirmar` (`limpiar`, `guardiana --id N`).
+- Guardiana: si la 9 es la guardiana, se adopta (se registra en
+  `planificador_tarea`) sin escribir. Solo se crea si no hay ninguna tarea
+  igual (31/12 00:00, 1 min); si la hay en otro id, aviso
+  `guardiana_en_otro_id` y no se toca nada.
+- `limpiar --confirmar` borra solo las tareas registradas en
+  `planificador_tarea` como franja propia que siguen en el cargador tal como
+  se escribieron. Nunca la guardiana, las ajenas ni una propia cambiada
+  fuera (la informa).
+- Formulario: Plan de carga con el modo (pasar a activo pide confirmación),
+  Cargar ahora, Detener, Modificar, Eliminar, Añadir franja (fin anterior
+  al inicio = día siguiente), estado de cada franja en el cargador
+  (pendiente, confirmada, error) y panel «Tareas en el cargador» de la
+  última lectura. Tras encolar espera hasta 4 s al muestreo y muestra el
+  resultado. Los avisos del planificador enlazan a Plan de carga.
+- CLI en el contenedor `muestreo` (el colector no tiene `VIARIS_URL`):
+  `planificador modo|tareas|reconciliar --en-seco|limpiar --confirmar|
+  guardiana --id N --confirmar`.
+- Verificado con tests contra un cargador simulado a nivel HTTP (el cliente
+  real con su validación): escritura idempotente, sombra en seco, fallo de
+  POST con la tarea en error, escritura no confirmada, guardiana ausente,
+  cargador sin respuesta, ajenas respetadas, NOTIFY, cola y permisos de
+  `formulario_rw` (solo inserta en `plan_accion`). Sin probar contra el
+  cargador real.
 
 ### Fuera de alcance
 

@@ -145,6 +145,23 @@ def test_id_de_la_guardiana_ocupado_no_se_crea_encima() -> None:
     assert r.avisos[0].nivel == "error" and "planificador guardiana --id N" in r.avisos[0].detalle
 
 
+def test_guardiana_en_otro_id_no_se_crea_otra() -> None:
+    """El id configurado (9) libre pero la guardiana está en el 4: no se crea otra ni se toca nada."""
+    lectura = leer()
+    g = lectura[2]
+    en_4 = Tarea(4, True, 0, 0, g.day, g.month, 0, 1, {**g.datos, "id": 4})
+    r = reconciliar(AHORA, "activo", 9, [*lectura[:2], en_4], [], plan((local(18, 23), local(19, 2))), CONGELAR)
+    assert r.operaciones == () and r.adoptar == ()
+    assert [a.clave for a in r.avisos] == ["guardiana_en_otro_id"] and "id_tarea_guardiana = 4" in r.avisos[0].detalle
+
+
+def test_adopta_la_guardiana_sin_escribir_en_ninguna_tarea_existente() -> None:
+    """Primer paso a activo con la lectura real: la 9 se adopta; ninguna operación sobre 5, 6 ni 9."""
+    r = reconciliar(AHORA, "activo", 9, leer(), [], plan((local(18, 23), local(19, 2))), CONGELAR)
+    assert [(p.id, p.papel, p.fecha) for p in r.adoptar] == [(9, "guardiana", date(2026, 12, 31))]
+    assert not {o.id for o in r.operaciones} & {5, 6, 9} and all(o.metodo == "POST" for o in r.operaciones)
+
+
 def test_terminadas_se_borran_y_las_caducadas_avisan() -> None:
     hecha, dato = franja_propia(1, local(18, 2), local(18, 6))
     reciente, dato2 = franja_propia(2, local(18, 13), local(18, 14, 45))

@@ -28,8 +28,8 @@ PANTALLAS = (
     ("Inicio", "Estado actual: nivel con su etiqueta, coche, próxima salida y energía necesaria. Próximas cargas del "
                "plan, anotar lectura y próximos 7 días."),
     ("Plan de carga", "Lo que ha calculado el planificador: franjas con su motivo, energía y coste, precio y franjas en "
-                      "una línea de tiempo, últimas franjas y ahorro. En sombra solo se muestra; las acciones llegan "
-                      "en el paso 3c."),
+                      "una línea de tiempo, últimas franjas y ahorro. Modo; fuera de sombra, Cargar ahora, "
+                      "franjas manuales, Detener y Eliminar; tareas que hay en el cargador."),
     ("Excepciones", "Días que no siguen el horario: con salida (consumo normal P75 o indicado en km o %) o sin salida. "
                     "Una por fecha; se pueden modificar o dar de baja."),
     ("Horario", "Primera salida de cada día de la semana. Los cambios se aplican desde que se guardan."),
@@ -46,7 +46,8 @@ PANTALLAS = (
 PLAN_CARGA = (
     ("horario", "sombra", "Calcula el plan cada 15 minutos y con cada cambio, y lo muestra, pero no escribe en el "
                           "cargador. Es el modo de la puesta en marcha."),
-    ("horario", "activo", "Escribe sus franjas en el cargador y las revisa cada 15 minutos (paso 3c)."),
+    ("horario", "activo", "Escribe sus franjas en el cargador, las confirma leyéndolo de vuelta y las revisa con "
+                          "cada plan. No pisa las tareas activas de la app ni la franja en curso."),
     ("horario", "pausa", "No escribe y desactiva sus franjas futuras; la franja en curso y la guardiana siguen."),
     ("info", "necesaria", "La energía para salir con el objetivo de cada salida, en las horas más baratas antes de "
                           "salir; si no bastan las baratas, también las caras."),
@@ -54,7 +55,7 @@ PLAN_CARGA = (
     ("ok", "oportunista", "Carga de más cuando la energía está barata, hasta el nivel oportunista; nunca por encima "
                           "del tope."),
     ("estimado", "guardiana", "Una tarea del cargador siempre activa (31/12 a las 00:00, 1 minuto) para que nunca "
-                              "cargue libremente cuando no hay franjas. El sistema no la toca nunca."),
+                              "cargue libremente cuando no hay franjas. El planificador nunca la desactiva ni la borra."),
 )
 
 

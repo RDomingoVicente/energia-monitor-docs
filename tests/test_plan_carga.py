@@ -313,6 +313,16 @@ def test_las_manuales_se_respetan_siempre() -> None:
     assert indices(plan) == [2]  # la manual aporta 2
 
 
+def test_los_bloqueos_se_respetan_sin_energia() -> None:
+    # Un tramo detenido (bloqueo) no se usa y no aporta energía; una franja congelada no se usa y sí la aporta.
+    bloqueo = Ocupado(T0, T0 + 2 * CUARTO, "bloqueo")
+    plan = planificar(entrada([0.01] * 2 + [0.05] * 6, salidas=[(8, 53, 4)], ocupados=(bloqueo,)))
+    assert indices(plan) == [2, 3, 4]
+    congelada = Ocupado(T0, T0 + 2 * CUARTO, "congelada", 3)
+    plan = planificar(entrada([0.01] * 2 + [0.05] * 6, salidas=[(8, 53, 4)], ocupados=(congelada,)))
+    assert indices(plan) == [2]
+
+
 def en_curso(desde: datetime, n: int, ahora: datetime) -> FranjaEnCurso:
     cuartos = tuple(CuartoPlan(desde + i * CUARTO, "necesaria", None, D(1), D("0.08"), False, "segura", False)
                     for i in range(n))

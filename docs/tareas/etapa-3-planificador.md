@@ -19,8 +19,9 @@ barata (E3.0). Se entrega en pasos que se revisan uno a uno (E3.11).
    del muestreo.**
 3. **3b, pantalla Plan de carga y panel de Inicio** (solo lectura), cuando las
    maquetas 1a–1d y 5 estén en docs/formulario-maquetas.md.
-4. ~~Al menos una semana en sombra~~: sustituida el 18/11/2026 por la
-   simulación en seco de 3c (E3.11).
+4. Al menos una semana en sombra (desde el 18/11, v0.6.0), además de la
+   simulación en seco de 3c: activación no antes del 25/11/2026 y tras
+   revisar `v_plan_ahorro` de esa semana (E3.11).
 5. **3c, escritura y reconciliación (v0.7.0)**: plan aceptado el 18/11/2026
    («Plan del paso 3c» en docs/fase2.md). Antes de activar: simulación en
    seco en el NAS (una o dos noches con una franja partida a medianoche, la
@@ -28,6 +29,7 @@ barata (E3.0). Se entrega en pasos que se revisan uno a uno (E3.11).
    desconexión y reconexión del coche), pruebas de escritura a mano
    (incluido un POST con un id ocupado) y tareas 5 y 6 desactivadas en la
    app.
+   Implementado (v0.7.0, sin desplegar): ver «Paso 3c» abajo.
 6. **3d, avisos**: correo desde el NAS, avisos nuevos y Grafana.
 
 ## Paso 3a
@@ -168,3 +170,43 @@ SELECT max(d) AS mayor_hueco, count(*) FILTER (WHERE d > interval '180 seconds')
 FROM (SELECT instante - lag(instante) OVER (ORDER BY instante) AS d
       FROM cargador_muestra WHERE instante > now() - interval '24 hours') x;
 ```
+
+## Paso 3c
+
+Plan y decisiones: «Plan del paso 3c» e «Implementación del paso 3c» en
+docs/fase2.md.
+
+### Antes de activar (en este orden)
+
+1. Desplegar v0.7.0 en sombra (la 0022 la aplica el arranque). Comprobar:
+
+   ```sh
+   docker compose exec muestreo python -m energia_monitor planificador tareas
+   docker compose exec muestreo python -m energia_monitor planificador reconciliar --en-seco
+   ```
+
+   `tareas` debe mostrar la 9 como guardiana y la 5 y la 6 como ajenas.
+2. Simulación en seco, una o dos noches: con el coche conectado, una franja
+   partida a medianoche, la publicación de los precios del día siguiente
+   con su recálculo y una desconexión y reconexión. Lo que habría escrito:
+
+   ```sql
+   SELECT instante AT TIME ZONE 'Europe/Madrid' AS hora, metodo, id_tarea, motivo,
+          cuerpo->'tasks'->0->'initTime'->'timeList'->0 AS franja
+   FROM plan_auditoria WHERE en_seco ORDER BY id DESC LIMIT 40;
+   ```
+
+   Ninguna operación sobre 5, 6 ni 9; cada franja del plan, una tarea (dos si
+   cruza la medianoche) en ids libres. En sombra nada queda escrito, así que
+   cada plan nuevo repite los POST de sus franjas: es lo esperado.
+3. Pruebas de escritura a mano (skill `viaris`), una a una y en horario
+   barato, incluido un POST sobre un id ocupado y un PUT con la tarea
+   completa.
+4. No antes del 25/11/2026: revisar `v_plan_ahorro` de la semana en sombra.
+   Después, desactivar en la app las tareas 5 y 6 (sin borrarlas).
+5. Activar de día (Plan de carga o `planificador modo activo`) y vigilar la
+   primera noche: `planificador tareas`, la app y `plan_auditoria`.
+
+Para volver atrás: `planificador modo sombra` (no borra) o
+`planificador limpiar --confirmar` (borra las propias; el coche no cargará
+hasta que actives tus tareas en la app).

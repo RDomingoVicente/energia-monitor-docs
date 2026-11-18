@@ -80,7 +80,11 @@ DESDE_BD = "bd"  # la franja en curso sale del último cálculo guardado
 
 
 def cargar_entrada(conn: psycopg.Connection, ahora: datetime, *, en_curso: FranjaEnCurso | None | str = DESDE_BD,
-                   ocupados: Sequence[Ocupado] = (), respetar_ajenas: bool = False) -> tuple[Entrada, Contexto]:
+                   ocupados: Sequence[Ocupado] | None = None,
+                   respetar_ajenas: bool | None = None) -> tuple[Entrada, Contexto]:
+    """Sin ocupados: los de la base de datos (paso 3c: ajenas de la última lectura del programador, franjas
+    manuales, bloqueos y franjas propias congeladas). Las ajenas se respetan en activo y en pausa; en sombra solo
+    se anotan los choques (E3.4)."""
     p = parametros_vigentes(conn, ahora)
     estado = conn.execute("SELECT capacidad_kwh, nivel_plan_kwh FROM bateria_estado(%s)", (ahora,)).fetchone()
     assert estado is not None
@@ -124,6 +128,12 @@ def cargar_entrada(conn: psycopg.Connection, ahora: datetime, *, en_curso: Franj
         umbral_disponibilidad_pct=p["umbral_disponibilidad_pct"], franja_min_min=int(p["franja_min_min"]),
         max_tareas=int(p["max_tareas_sistema"]))
     modo = conn.execute("SELECT planificador_modo_en(%s)", (ahora,)).fetchone()[0]  # type: ignore[index]
+    if ocupados is None:
+        from energia_monitor.plan_carga import escritura
+
+        ocupados = escritura.ocupados(conn, ahora, horizonte_fin + CUARTO)
+    if respetar_ajenas is None:
+        respetar_ajenas = modo in ("activo", "pausa")
     factor = conn.execute("SELECT valor FROM cargador_parametro WHERE clave = 'factor_contador'"
                           " AND vigencia @> %s::date", (ahora.astimezone(MADRID).date(),)).fetchone()
     entrada = Entrada(
@@ -339,7 +349,7 @@ def simular(conn: psycopg.Connection, ahora: datetime) -> Simulacion:
     abierta): un cálculo cada 15 minutos y en cada evento, conservando la franja en curso del cálculo anterior.
     Compara el plan efectivo (cada cuarto según el último cálculo anterior a su inicio) con lo real y con cargar
     al enchufar, con la referencia en Python de v_plan_ahorro. No guarda nada."""
-    entrada, ctx, plan, ms = calcular(conn, ahora, en_curso=None)
+    entrada, ctx, plan, ms = calcular(conn, ahora, en_curso=None, ocupados=())
     fila = conn.execute("SELECT inicio, fin FROM plan_conexiones(%s, %s) ORDER BY inicio LIMIT 1",
                         (ahora, ahora + timedelta(seconds=1))).fetchone()
     if fila is None:
@@ -365,7 +375,7 @@ def simular(conn: psycopg.Connection, ahora: datetime) -> Simulacion:
             t, motivo = periodico, "periódico"
         else:
             break
-        _, _, nuevo, ms = calcular(conn, t, en_curso=en_curso_de(calculos[-1][2], t))
+        _, _, nuevo, ms = calcular(conn, t, en_curso=en_curso_de(calculos[-1][2], t), ocupados=())
         maximo = max(maximo, ms)
         calculos.append((t, motivo, nuevo))
 

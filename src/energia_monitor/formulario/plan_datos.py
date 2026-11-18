@@ -16,6 +16,7 @@ import psycopg
 
 from energia_monitor.plan_carga import disponibilidad, precios
 from energia_monitor.plan_carga.ahorro import cuarto_de
+from energia_monitor.plan_carga.franjas import num_tareas
 from energia_monitor.plan_carga.modelo import CUARTO, PRIORIDAD
 from energia_monitor.tiempo import MADRID
 
@@ -36,6 +37,8 @@ class FranjaPlan:
     desglose: tuple[tuple[str, datetime | None, Decimal], ...]  # (nivel, salida, kWh del cargador)
     ejecucion: str  # programada · en su horario · coche cargando · …
     progreso_kwh: Decimal | None = None  # en curso: kWh reales del cargador desde su inicio
+    manual: bool = False  # fijada desde el formulario (o Cargar ahora)
+    estado_cargador: str = "no escrita (sombra)"  # E3.5: pendiente, confirmada, error · motivo
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,25 @@ class Ahorro:
     @property
     def ahorro(self) -> Decimal:
         return self.referencia - self.real
+
+
+@dataclass(frozen=True)
+class TareaCargador:
+    """Una fila del panel «Tareas en el cargador» (de la última lectura del programador)."""
+
+    id: int
+    origen: str  # planificador | manual | app Orbis | guardiana
+    programacion: str
+    estado: str  # activa | en curso | inactiva
+
+
+@dataclass(frozen=True)
+class Accion:
+    id: int
+    tipo: str
+    estado: str  # pendiente | hecha | error
+    resultado: str | None
+    datos: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -135,6 +157,10 @@ class PlanCarga:
     linea: Linea | None = None
     linea_movil: Linea | None = None
     avisos: list[str] = field(default_factory=list)
+    tareas_cargador: list[TareaCargador] | None = None  # None: aún sin lectura del programador
+    lectura_en: datetime | None = None
+    libres: list[int] = field(default_factory=list)
+    ultima_accion: Accion | None = None
 
     @property
     def sombra(self) -> bool:
@@ -175,10 +201,51 @@ def _ejecucion(f_inicio: datetime, f_fin: datetime, ahora: datetime, sombra: boo
     return "cargando" if cargando else "en pausa"
 
 
+def _estado_cargador(propias: list[tuple[int, datetime | None, str, str | None]], inicio: datetime,
+                     sombra: bool) -> str:
+    """E3.5 a partir de planificador_tarea (las tareas de la franja: una, o dos si cruza la medianoche)."""
+    estados = [(e, err) for _, fi, e, err in propias if fi == inicio]
+    if not estados:
+        return "no escrita (sombra)" if sombra else "pendiente"
+    if any(e == "error" for e, _ in estados):
+        return "error · " + next(err or "" for e, err in estados if e == "error")
+    if any(e == "pendiente" for e, _ in estados):
+        return "pendiente"
+    return "confirmada"
+
+
+def _manuales(conn: psycopg.Connection, ahora: datetime, sombra: bool, cargando: bool,
+              ya: list[FranjaPlan]) -> list[FranjaPlan]:
+    """Franjas manuales activas y franjas propias del cargador que el plan ya no contiene (en curso o congeladas):
+    también se muestran, porque están (o estarán) en el cargador."""
+    propias = conn.execute("SELECT id_tarea, franja_inicio, estado, error FROM planificador_tarea"
+                           " WHERE papel = 'franja'").fetchall()
+    potencia = conn.execute("SELECT bateria_param('potencia_carga_inicial_kw', %s)", (ahora,)).fetchone()[0]  # type: ignore[index]
+    salida = []
+    vistas = {f.inicio for f in ya}
+    filas = [(i, f, "manual", True) for i, f in conn.execute(
+        "SELECT inicio, fin FROM plan_manual WHERE anulada_en IS NULL AND fin > %s ORDER BY inicio", (ahora,))]
+    filas += [(i, f, "en el cargador", False) for i, f in conn.execute(
+        "SELECT DISTINCT franja_inicio, franja_fin FROM planificador_tarea WHERE papel = 'franja'"
+        " AND origen = 'automatica' AND franja_fin > %s", (ahora,)) if i is not None]
+    for inicio, fin, nivel, manual in filas:
+        if inicio in vistas:
+            continue
+        vistas.add(inicio)
+        kwh = potencia * Decimal((fin - inicio).total_seconds()) / 3600
+        salida.append(FranjaPlan(inicio, fin, kwh, False, num_tareas(inicio, fin),
+                                 inicio <= ahora < fin, None, None, ((nivel, None, kwh),),
+                                 _ejecucion(inicio, fin, ahora, sombra, cargando), None, manual,
+                                 _estado_cargador(propias, inicio, sombra)))
+    return salida
+
+
 def _franjas(conn: psycopg.Connection, calculo_id: int, ahora: datetime, sombra: bool,
              cargando: bool) -> list[FranjaPlan]:
     cuartos = conn.execute("SELECT inicio, nivel, salida, kwh_cargador FROM plan_cuarto WHERE calculo_id = %s",
                            (calculo_id,)).fetchall()
+    propias = conn.execute("SELECT id_tarea, franja_inicio, estado, error FROM planificador_tarea"
+                           " WHERE papel = 'franja'").fetchall()
     lista = []
     for inicio, fin, kwh, provisional, tareas, en_curso, precio, coste in conn.execute(
             "SELECT inicio, fin, kwh_cargador, provisional, tareas, en_curso, precio_medio_eur_kwh, coste_eur"
@@ -196,8 +263,10 @@ def _franjas(conn: psycopg.Connection, calculo_id: int, ahora: datetime, sombra:
                                 " AND inicio < %s", (inicio, ahora)).fetchone()
             progreso = fila[0] if fila else None
         lista.append(FranjaPlan(inicio, fin, kwh, provisional, tareas, en_curso, precio, coste, desglose,
-                                _ejecucion(inicio, fin, ahora, sombra, cargando), progreso))
-    return lista
+                                _ejecucion(inicio, fin, ahora, sombra, cargando), progreso, False,
+                                _estado_cargador(propias, inicio, sombra)))
+    lista += _manuales(conn, ahora, sombra, cargando, lista)
+    return sorted(lista, key=lambda f: f.inicio)
 
 
 def _linea(conn: psycopg.Connection, ahora: datetime, desde: datetime, horas: int, franjas: list[FranjaPlan],
@@ -285,6 +354,7 @@ def plan_carga(conn: psycopg.Connection, ahora: datetime) -> PlanCarga:
                      "SELECT * FROM plan_franjas_pasadas(%s, %s) ORDER BY inicio DESC",
                      (ahora - timedelta(days=7), ahora))]
     d.ahorro = _ahorro(conn, ahora)
+    _tareas_cargador(conn, d)
     if calc is None:
         return d
     ident, d.calculado, d.prudente, d.capacidad_kwh, d.umbral, d.horizonte_fin, avisos = calc
@@ -315,6 +385,52 @@ def plan_carga(conn: psycopg.Connection, ahora: datetime) -> PlanCarga:
     hora = ahora.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
     d.linea_movil = _linea(conn, ahora, hora, 24, d.franjas, d.salidas, d.umbral, d.prudente)
     return d
+
+
+DIAS_SEMANA = ("D", "L", "M", "X", "J", "V", "S")
+
+
+def _tareas_cargador(conn: psycopg.Connection, d: PlanCarga) -> None:
+    """Panel «Tareas en el cargador» desde la última lectura (planificador_lectura)."""
+    from energia_monitor.viaris import parsear_programador
+
+    fila = conn.execute("SELECT leida_en, ok, tareas FROM planificador_lectura").fetchone()
+    if fila is None or not fila[1]:
+        return
+    d.lectura_en = fila[0]
+    leidas = parsear_programador([{"name": "mennekes", "data": {"cfg": {"tasks": fila[2]}}}])
+    registradas = dict(conn.execute("SELECT id_tarea, origen FROM planificador_tarea"))
+    gid = int(_param(conn, "id_tarea_guardiana", d.ahora))
+    filas = []
+    for t in sorted(leidas, key=lambda x: x.id):
+        franja = f"{t.hour_min // 60:02d}:{t.hour_min % 60:02d}"
+        fin_min = t.hour_min + t.duracion
+        if t.dia_mes:
+            programacion = f"{t.dia_mes[0]:02d}/{t.dia_mes[1]:02d} {franja}"
+        elif t.weekday == 0 and t.day == 0 and t.month == 0:
+            programacion = f"todos los días {franja}"
+        else:
+            programacion = "".join(x for i, x in enumerate(DIAS_SEMANA) if t.weekday & (1 << i)) + f" {franja}"
+        programacion += f" · {t.duracion} min" if t.duracion < 60 else f" · {t.duracion // 60} h" + (
+            f" {t.duracion % 60} min" if t.duracion % 60 else "")
+        if t.id == gid:
+            origen = "guardiana"
+        elif t.id in registradas:
+            origen = "manual" if registradas[t.id] == "manual" else "planificador"
+        else:
+            origen = "app Orbis"
+        local = d.ahora.astimezone(MADRID)
+        hoy = (t.dia_mes is None or t.dia_mes == (local.day, local.month))
+        en_curso = t.activa and hoy and t.hour_min <= local.hour * 60 + local.minute < fin_min and origen != "app Orbis"
+        filas.append(TareaCargador(t.id, origen, programacion, "en curso" if en_curso else
+                                   ("activa" if t.activa else "inactiva")))
+    d.tareas_cargador = filas
+    d.libres = [i for i in range(1, 11) if i not in {t.id for t in leidas}]
+
+
+def accion(conn: psycopg.Connection, ident: int) -> Accion | None:
+    fila = conn.execute("SELECT id, tipo, estado, resultado, datos FROM plan_accion WHERE id = %s", (ident,)).fetchone()
+    return None if fila is None else Accion(*fila)
 
 
 def proximas_cargas(conn: psycopg.Connection, ahora: datetime, n: int = 3) -> tuple[str, list[FranjaPlan]]:

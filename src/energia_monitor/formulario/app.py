@@ -16,7 +16,9 @@ import logging
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
+from time import monotonic as time_monotonic
+from time import sleep as dormir
 from decimal import Decimal, InvalidOperation
 from importlib import resources
 from urllib.parse import parse_qs, urlsplit
@@ -33,6 +35,8 @@ from energia_monitor.formulario.pantallas import carga_externa, excepciones, his
 from energia_monitor.formulario.pantallas import parametros as pantalla_parametros
 from energia_monitor.formulario.pantallas import plan_carga as pantalla_plan
 from energia_monitor.formulario.plantilla import Marco, banner, error_pagina, pagina
+from energia_monitor.plan_carga import acciones as plan_acciones
+from energia_monitor.tiempo import MADRID
 
 log = logging.getLogger(__name__)
 
@@ -100,11 +104,13 @@ def _texto(estado: int, texto: str) -> Respuesta:
 class App:
     def __init__(self, config: ConfigApp, conectar: Callable[[], psycopg.Connection] = db.conectar,
                  reloj: Callable[[], datetime] = lambda: datetime.now(UTC),
-                 migracion_esperada: str | None = None) -> None:
+                 migracion_esperada: str | None = None, espera_accion_s: float = 4.0) -> None:
         self.config = config
         self.conectar = conectar
         self.reloj = reloj
         self.migracion_esperada = migracion_esperada or _ultima_migracion()
+        # Tras encolar una acción del plan, cuánto se espera a que el muestreo la procese antes del PRG.
+        self.espera_accion_s = espera_accion_s
 
     # --- Entrada -------------------------------------------------------------------------
 
@@ -141,9 +147,7 @@ class App:
         if p.camino == "/":
             return self._con_bd(lambda conn, marco: self.get_inicio(conn, marco, p))
         if p.camino == "/plan":
-            return self._con_bd(lambda conn, marco: _html(200, pagina(
-                marco, "plan", "plan", pantalla_plan.pantalla(plan_datos.plan_carga(conn, self.reloj())),
-                "Plan de carga")))
+            return self._con_bd(lambda conn, marco: self.get_plan(conn, marco, p))
         if p.camino == "/excepciones":
             return self._con_bd(lambda conn, marco: self.get_excepciones(conn, marco, p))
         if p.camino == "/historial":
@@ -174,6 +178,11 @@ class App:
             (r"/carga-externa/(\d+)/anular", self.post_anular_carga_externa),
             (r"/horario", self.post_horario),
             (r"/parametros", self.post_parametros),
+            (r"/plan/modo", self.post_plan_modo),
+            (r"/plan/cargar-ahora", self.post_plan_cargar_ahora),
+            (r"/plan/franjas", self.post_plan_franja),
+            (r"/plan/franjas/detener", self.post_plan_detener),
+            (r"/plan/franjas/eliminar", self.post_plan_eliminar),
         ]
 
     def _mismo_origen(self, p: Peticion) -> bool:
@@ -216,6 +225,110 @@ class App:
         cuerpo["estado"] = "ok" if ok else "error"
         return Respuesta(200 if ok else 503, json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"),
                          "application/json; charset=utf-8", {"Cache-Control": "no-store"})
+
+    # --- Plan de carga (7.9; acciones desde el paso 3c) ------------------------------------
+
+    def get_plan(self, conn: psycopg.Connection, marco: Marco, p: Peticion,
+                 form: pantalla_plan.FormFranja | None = None, fm: pantalla_plan.FormModo | None = None,
+                 estado: int = 200) -> Respuesta:
+        ahora = self.reloj()
+        d = plan_datos.plan_carga(conn, ahora)
+        ok = _ok(p)
+        if ok is not None and ok[0] == "accion":
+            d.ultima_accion = plan_datos.accion(conn, ok[1])
+        if form is None:
+            form = pantalla_plan.FormFranja()
+            texto = p.consulta.get("modificar", [""])[0]
+            fr = next((x for x in d.franjas if x.inicio.isoformat() == texto and x.ejecucion == "programada"), None)
+            if fr is not None:
+                li, lf = formato.local(fr.inicio), formato.local(fr.fin)
+                form = pantalla_plan.FormFranja(f"{li:%Y-%m-%d}", f"{li:%H:%M}", f"{lf:%H:%M}", fr.inicio.isoformat(),
+                                                fr.fin.isoformat())
+        return _html(estado, pagina(marco, "plan", "plan", pantalla_plan.pantalla(d, form, fm), "Plan de carga"))
+
+    def _encolar_plan(self, conn: psycopg.Connection, tipo: str, datos_: dict[str, object]) -> Respuesta:
+        """Encola, confirma (el NOTIFY sale al confirmar) y espera un poco al muestreo antes del PRG."""
+        ident = plan_acciones.encolar(conn, tipo, datos_)
+        conn.commit()
+        limite = time_monotonic() + self.espera_accion_s
+        while time_monotonic() < limite:
+            fila = conn.execute("SELECT estado FROM plan_accion WHERE id = %s", (ident,)).fetchone()
+            conn.commit()
+            if fila is None or fila[0] != "pendiente":
+                break
+            dormir(0.25)
+        return _redirigir(f"/plan?ok=accion&id={ident}")
+
+    def post_plan_modo(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        v = p.formulario()
+        modo = v.get("modo", "")
+        if modo not in plan_acciones.MODOS:
+            return self.get_plan(conn, marco, p, fm=pantalla_plan.FormModo({"confirmar": "Elige un modo."}), estado=422)
+        actual = conn.execute("SELECT planificador_modo_en(%s)", (self.reloj(),)).fetchone()[0]  # type: ignore[index]
+        if modo == actual:
+            return _redirigir("/plan")
+        if modo == "activo" and v.get("confirmar") != "si":
+            return self.get_plan(conn, marco, p, fm=pantalla_plan.FormModo(
+                {"confirmar": "Para pasar a activo, marca la casilla: el planificador escribirá en el cargador."}),
+                estado=422)
+        return self._encolar_plan(conn, "modo", {"modo": modo, "nota": "formulario"})
+
+    def _sombra(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta | None:
+        """En sombra las acciones sobre franjas no se encolan (no se escribe nada en el cargador): 409."""
+        modo = conn.execute("SELECT planificador_modo_en(%s)", (self.reloj(),)).fetchone()[0]  # type: ignore[index]
+        if modo != "sombra":
+            return None
+        form = pantalla_plan.FormFranja(errores={"general": "En sombra no se escribe en el cargador. "
+                                                            + pantalla_plan.EN_SOMBRA})
+        return self.get_plan(conn, marco, p, form, estado=409)
+
+    def post_plan_cargar_ahora(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        if (r := self._sombra(conn, marco, p)) is not None:
+            return r
+        return self._encolar_plan(conn, "cargar_ahora", {})
+
+    def post_plan_franja(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        if (r := self._sombra(conn, marco, p)) is not None:
+            return r
+        v = p.formulario()
+        form = pantalla_plan.FormFranja(v.get("dia", ""), v.get("inicio", ""), v.get("fin", ""),
+                                        v.get("anterior_inicio", ""), v.get("anterior_fin", ""))
+        franja = _franja_desde_form(form)
+        if franja is None:
+            return self.get_plan(conn, marco, p, form, estado=422)
+        inicio, fin = franja
+        anterior = None
+        if form.anterior_inicio:
+            try:
+                anterior = (datetime.fromisoformat(form.anterior_inicio), datetime.fromisoformat(form.anterior_fin))
+            except ValueError:
+                form.errores["general"] = "La franja que se modifica no es válida; vuelve a abrirla desde la lista."
+                return self.get_plan(conn, marco, p, form, estado=422)
+        error = plan_acciones.validar_en_bd(conn, inicio, fin, self.reloj(), anterior)
+        if error:
+            form.errores["general"] = error
+            return self.get_plan(conn, marco, p, form, estado=422)
+        datos_: dict[str, object] = {"inicio": inicio.isoformat(), "fin": fin.isoformat()}
+        if anterior is not None:
+            datos_.update(anterior_inicio=anterior[0].isoformat(), anterior_fin=anterior[1].isoformat())
+        return self._encolar_plan(conn, "modificar" if anterior else "anadir", datos_)
+
+    def post_plan_detener(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        if (r := self._sombra(conn, marco, p)) is not None:
+            return r
+        inicio = _instante_form(p.formulario().get("inicio", ""))
+        if inicio is None:
+            return _texto(400, "Franja no válida")
+        return self._encolar_plan(conn, "detener", {"inicio": inicio.isoformat()})
+
+    def post_plan_eliminar(self, conn: psycopg.Connection, marco: Marco, p: Peticion) -> Respuesta:
+        if (r := self._sombra(conn, marco, p)) is not None:
+            return r
+        v = p.formulario()
+        inicio, fin = _instante_form(v.get("inicio", "")), _instante_form(v.get("fin", ""))
+        if inicio is None or fin is None:
+            return _texto(400, "Franja no válida")
+        return self._encolar_plan(conn, "eliminar", {"inicio": inicio.isoformat(), "fin": fin.isoformat()})
 
     # --- Inicio ---------------------------------------------------------------------------
 
@@ -595,6 +708,40 @@ def _pct_e_instante(pct_txt: str, fecha: str, hora: str, errores: dict[str, str]
         except bateria_servicio.ErrorLectura as e:
             errores["hora"] = _frase(str(e))
     return pct, instante
+
+
+def _instante_form(texto: str) -> datetime | None:
+    try:
+        x = datetime.fromisoformat(texto)
+    except ValueError:
+        return None
+    return x if x.tzinfo is not None else None
+
+
+def _franja_desde_form(form: pantalla_plan.FormFranja) -> tuple[datetime, datetime] | None:
+    """Día y horas locales (múltiplos de 15 min) a instantes UTC; un fin no posterior al inicio es del día
+    siguiente. Rellena form.errores y devuelve None si algo no vale."""
+    try:
+        dia = date.fromisoformat(form.dia)
+    except ValueError:
+        form.errores["dia"] = "Fecha no válida."
+    horas: dict[str, time] = {}
+    for campo in ("inicio", "fin"):
+        try:
+            x = time.fromisoformat(getattr(form, campo))
+        except ValueError:
+            form.errores[campo] = "Hora no válida (HH:MM)."
+            continue
+        if x.minute % 15 or x.second:
+            form.errores[campo] = "En cuartos de hora (:00, :15, :30, :45)."
+        horas[campo] = x
+    if form.errores:
+        return None
+    inicio = datetime.combine(dia, horas["inicio"], MADRID)
+    fin = datetime.combine(dia, horas["fin"], MADRID)
+    if fin <= inicio:
+        fin = datetime.combine(dia + timedelta(days=1), horas["fin"], MADRID)
+    return inicio.astimezone(UTC), fin.astimezone(UTC)
 
 
 def _redirigir(destino: str) -> Respuesta:

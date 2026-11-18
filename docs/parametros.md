@@ -251,8 +251,12 @@ reglas que los de la batería (CLI con `--ambito bateria`). Migración 0020:
   Una clave nueva en una migración futura debe llevar grupo y orden (son NOT
   NULL).
 - `editable` = false en `id_tarea_guardiana`: la página no deja cambiarla;
-  solo el CLI. Hasta el paso 3c no tiene efecto (el código no escribe en el
-  cargador); desde 3c, cambiarla exige migrar la guardiana.
+  solo el CLI. Desde el paso 3c no se cambia con `parametro registrar`
+  sino con `planificador guardiana --id N --confirmar` (crea la guardiana en
+  el id nuevo, la confirma, registra el parámetro y borra la vieja).
+- `congelar_franja_min` (0022, grupo 6, 30 min, rango 0–120): una franja
+  propia que empieza en menos de ese tiempo ya no se mueve ni se borra; se
+  deja como está en el cargador y el plan cuenta su energía.
 - `carga_oportunista` va como 0/1. `hora_publicacion_precios` (unidad
   «hora») se guarda en minutos desde las 00:00 (810 = 13:30, rango
   720–1080), pero en la página y en el CLI se escribe y se muestra HH:MM:
@@ -268,7 +272,12 @@ reglas que los de la batería (CLI con `--ambito bateria`). Migración 0020:
 Fuera de `bateria_parametro`:
 
 - `planificador_modo` (sombra, activo o pausa, desde un instante, con
-  historial). En el paso 3a solo hay sombra y no hay forma de cambiarlo.
+  historial). Desde el paso 3c se cambia en Plan de carga o con el CLI
+  (contenedor `muestreo`, que es el que tiene `VIARIS_URL`):
+
+  ```sh
+  docker compose exec muestreo python -m energia_monitor planificador modo activo
+  ```
 - `planificador_config` (una fila): contrato y fuente del precio del
   planificador (`vivienda`, `omie`). Solo por SQL:
 
@@ -293,3 +302,15 @@ pasado con su coste frente al real y a cargar al enchufar:
 docker compose exec collector python -m energia_monitor planificador plan
 docker compose exec collector python -m energia_monitor planificador simular --dia 2026-11-17
 ```
+
+Paso 3c (hablan con el cargador; en el contenedor `muestreo`):
+
+```sh
+docker compose exec muestreo python -m energia_monitor planificador tareas
+docker compose exec muestreo python -m energia_monitor planificador reconciliar --en-seco
+docker compose exec muestreo python -m energia_monitor planificador limpiar --confirmar
+docker compose exec muestreo python -m energia_monitor planificador guardiana --id 10 --confirmar
+```
+
+`limpiar` pasa a sombra y borra las tareas propias salvo la guardiana: con
+solo la guardiana activa el cargador no carga fuera de ella.

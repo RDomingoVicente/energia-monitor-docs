@@ -190,7 +190,15 @@ def reconciliar(ahora: datetime, modo: str, guardiana_id: int, lectura: Sequence
     g = leidas.get(guardiana_id)
     propia_g = registradas.get(guardiana_id)
     guardiana_ok = False
-    if g is None:
+    otra_g = next((t.id for t in lectura if t.id != guardiana_id and es_guardiana(t)), None)
+    if g is None and otra_g is not None:
+        # Ya hay una tarea igual a la guardiana en otro id: no se crea otra; se resuelve a mano.
+        avisos.append(Aviso("guardiana_en_otro_id", "error", "Guardiana en otro id",
+                            f"La tarea {otra_g} es como la guardiana (31/12 00:00, 1 min) pero id_tarea_guardiana es "
+                            f"{guardiana_id}: no se crea otra. Registra id_tarea_guardiana = {otra_g} (CLI "
+                            "«parametro registrar --ambito bateria --clave id_tarea_guardiana»).",
+                            "guardiana en un id distinto de id_tarea_guardiana"))
+    elif g is None:
         if propia_g is not None and propia_g.papel != "guardiana":
             avisos.append(Aviso("guardiana_ocupada", "error", "Id de la tarea guardiana ocupado",
                                 f"El id {guardiana_id} está registrado como franja propia.", "id_tarea_guardiana"))
@@ -234,7 +242,8 @@ def reconciliar(ahora: datetime, modo: str, guardiana_id: int, lectura: Sequence
     for p in sorted((x for x in propias if x.papel == "franja"), key=lambda x: x.inicio):
         t = leidas.get(p.id)
         if t is None:
-            if p.estado != "pendiente":
+            # Pendiente o en error: su POST no llegó (ya avisado como escritura fallida). Confirmada: la borraron fuera.
+            if p.estado == "confirmada":
                 avisos.append(Aviso(f"tarea_desaparecida:{p.id}", "aviso", "Tarea propia borrada fuera del sistema",
                                     f"La tarea {p.id} ya no está en el cargador; el plan la vuelve a escribir si "
                                     "hace falta.", "tarea propia ausente en la lectura"))

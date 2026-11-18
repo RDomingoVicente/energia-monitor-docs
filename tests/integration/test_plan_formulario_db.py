@@ -68,8 +68,7 @@ def calculo_a_mano(conn: psycopg.Connection, ahora, franjas: list[tuple]) -> int
 def test_plan_sin_calculo(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
     t = texto(get(nombre_bd, AHORA, "/plan").encode())
     assert "Aún no hay plan" in t and "Sin cargas programadas." in t
-    assert "disponible en el paso 3c" in t
-    assert "En sombra el plan no tiene en cuenta las tareas de la app de Orbis (E3.4)." in t
+    assert "Tareas en el cargador" in t and "Aún sin lectura del programador." in t
 
 
 def test_plan_en_sombra(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
@@ -83,10 +82,10 @@ def test_plan_en_sombra(conn: psycopg.Connection, nombre_bd: str, limpio: None) 
     assert "SOMBRA" in t and "no escrita (sombra)" in t and "programada" in t
     # Desglose por nivel en la tabla: necesaria con su salida, margen y oportunista.
     assert re.search(r"necesaria [0-9,]+ · jue 09:00", t) and re.search(r"oportunista [0-9,]+", t)
-    # Modo: selector desactivado con sombra marcada; nada que envíe datos.
-    assert '<input type="radio" name="modo" value="sombra" disabled checked>' in html
-    assert 'name="modo" value="activo" disabled>' in html
-    assert 'action="/plan"' not in html and "<form" not in html.split('<main>')[1]
+    # Modo: selector con sombra marcada (se puede cambiar); las acciones sobre franjas, desactivadas en sombra.
+    assert '<input type="radio" name="modo" value="sombra" checked>' in html
+    assert 'name="modo" value="activo">' in html and 'action="/plan/modo" method="post"' in html
+    assert 'action="/plan/franjas/eliminar"' not in html and '<fieldset class="relleno" disabled>' in html
     # Línea de tiempo: 60 barras de precio por hora en escritorio y 24 en móvil.
     escritorio, movil = html.split('class="lt lt-240"')[1], html.split('class="lt lt-96 movil"')[1]
     assert escritorio.split('class="lt lt-96')[0].count('class="lt-barra') == 60
@@ -119,9 +118,10 @@ def test_franja_en_curso_en_sombra(conn: psycopg.Connection, nombre_bd: str, lim
     html = get(nombre_bd, AHORA, "/plan")
     t = texto(html.encode())
     assert esperado in t
-    # La franja en curso solo ofrece Detener (desactivado en 3b).
+    # La franja en curso solo ofrece Detener, desactivado en sombra.
     fila = html.split('class="fija franjas-plan"')[1].split("</tr>")[1]
-    assert ">Detener</button>" in fila and "Modificar" not in fila and "disabled" in fila
+    assert ">Detener</button>" in fila and "Modificar" not in fila and "/plan/franjas/detener" not in fila
+    assert 'disabled title="Cambia a activo para usarlo."' in fila
 
 
 def test_ultimas_franjas_en_sombra(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
@@ -225,3 +225,98 @@ def test_navegacion(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> N
     inferior = html.split('<nav class="nav"')[1].split("</nav>")[0]
     assert re.findall(r"</svg>([^<]+)</a>", inferior) == ["Inicio", "Plan", "Excepciones", "Horario", "Ajustes"]
     assert "formulario / <span>plan</span>" in html
+
+
+# --- Acciones (paso 3c) ---------------------------------------------------------------------------
+
+
+def post(nombre_bd: str, ahora, ruta: str, cuerpo: str):  # type: ignore[no-untyped-def]
+    from energia_monitor.formulario.app import Peticion as P
+
+    app = app_rw(nombre_bd, ahora)
+    app.espera_accion_s = 0
+    return app.manejar(P("POST", ruta, {**CAB, "content-type": "application/x-www-form-urlencoded"},
+                         cuerpo.encode()))
+
+
+def activo(conn: psycopg.Connection) -> None:
+    conn.execute("INSERT INTO planificador_modo (desde, modo, origen) VALUES (%s, 'activo', 'usuario')",
+                 (AHORA - timedelta(hours=1),))
+
+
+@pytest.fixture
+def sin_acciones(conn: psycopg.Connection) -> Iterator[None]:
+    conn.execute("DELETE FROM plan_accion")
+    yield
+    conn.execute("DELETE FROM plan_accion")
+    conn.execute("DELETE FROM planificador_modo WHERE desde > '2025-01-02Z'")
+
+
+def test_en_sombra_acciones_desactivadas(conn: psycopg.Connection, nombre_bd: str, limpio: None,
+                                         sin_acciones: None) -> None:
+    escenario(conn)
+    calculo_a_mano(conn, AHORA, [(local(12, 2), local(12, 4), "necesaria", local(12, 9), False)])
+    html = get(nombre_bd, AHORA, "/plan")
+    # Cargar ahora, y Modificar y Eliminar en la tabla (escritorio) y en la tarjeta (móvil).
+    assert html.count('disabled title="Cambia a activo para usarlo."') == 5
+    assert '<fieldset class="relleno" disabled>' in html and "Cambia a activo para usarlo." in texto(html.encode())
+    assert 'action="/plan/franjas/eliminar"' not in html and 'name="modo" value="activo">' in html
+    for ruta, cuerpo in (("/plan/cargar-ahora", ""), ("/plan/franjas", "dia=2026-11-12&inicio=02:00&fin=03:00"),
+                         ("/plan/franjas/detener", "inicio=2026-11-12T01%3A00%3A00%2B00%3A00"),
+                         ("/plan/franjas/eliminar", "inicio=2026-11-12T01%3A00%3A00%2B00%3A00&fin=x")):
+        r = post(nombre_bd, AHORA, ruta, cuerpo)
+        assert r.estado == 409 and "Cambia a activo para usarlo." in texto(r.cuerpo), ruta
+    assert conn.execute("SELECT count(*) FROM plan_accion").fetchone() == (0,)
+
+
+def test_acciones_encolan_y_validan(conn: psycopg.Connection, nombre_bd: str, limpio: None,
+                                    sin_acciones: None) -> None:
+    escenario(conn)
+    # Activo sin confirmar: 422 y nada en la cola.
+    r = post(nombre_bd, AHORA, "/plan/modo", "modo=activo")
+    assert r.estado == 422 and "marca la casilla" in texto(r.cuerpo)
+    assert conn.execute("SELECT count(*) FROM plan_accion").fetchone() == (0,)
+    r = post(nombre_bd, AHORA, "/plan/modo", "modo=activo&confirmar=si")
+    assert r.estado == 303 and r.cabeceras["Location"].startswith("/plan?ok=accion&id=")
+    activo(conn)  # lo que haría el muestreo al procesar la acción
+    # Franja manual: cuartos de hora, fin del día siguiente si es anterior al inicio y validación previa.
+    r = post(nombre_bd, AHORA, "/plan/franjas", "dia=2026-11-12&inicio=02:10&fin=03:00")
+    assert r.estado == 422 and "En cuartos de hora" in texto(r.cuerpo)
+    r = post(nombre_bd, AHORA, "/plan/franjas", "dia=2026-11-11&inicio=23:30&fin=00:30")
+    assert r.estado == 303
+    r = post(nombre_bd, AHORA, "/plan/franjas", "dia=2026-11-11&inicio=22:00&fin=22:15")
+    assert r.estado == 422 and "franja mínima" in texto(r.cuerpo)
+    filas = conn.execute("SELECT tipo, datos->>'inicio', datos->>'fin', estado FROM plan_accion ORDER BY id").fetchall()
+    assert [(f[0], f[3]) for f in filas] == [("modo", "pendiente"), ("anadir", "pendiente")]
+    assert filas[1][1] == local(11, 23, 30).isoformat() and filas[1][2] == local(12, 0, 30).isoformat()
+    # Resultado tras el PRG: pendiente, y tras procesarla, hecha.
+    ident = conn.execute("SELECT max(id) FROM plan_accion").fetchone()[0]  # type: ignore[index]
+    assert "enviada al cargador" in texto(get(nombre_bd, AHORA, f"/plan?ok=accion&id={ident}").encode())
+    conn.execute("UPDATE plan_accion SET estado = 'hecha', resultado = 'franja manual guardada' WHERE id = %s",
+                 (ident,))
+    assert "Franja manual: franja manual guardada." in texto(get(nombre_bd, AHORA, f"/plan?ok=accion&id={ident}"
+                                                                 ).encode())
+
+
+def test_detener_fallido_ofrece_reintentar(conn: psycopg.Connection, nombre_bd: str, limpio: None,
+                                           sin_acciones: None) -> None:
+    escenario(conn)
+    activo(conn)
+    inicio = AHORA - timedelta(minutes=30)
+    r = post(nombre_bd, AHORA, "/plan/franjas/detener", f"inicio={inicio.isoformat().replace('+', '%2B')}")
+    assert r.estado == 303
+    conn.execute("UPDATE plan_accion SET estado = 'error', resultado = 'No se pudo detener: x. Pulsa «Reintentar».'")
+    ident = conn.execute("SELECT max(id) FROM plan_accion").fetchone()[0]  # type: ignore[index]
+    html = get(nombre_bd, AHORA, f"/plan?ok=accion&id={ident}")
+    assert 'class="reintentar"' in html and inicio.isoformat() in html
+    assert post(nombre_bd, AHORA, "/plan/franjas/detener", "inicio=ayer").estado == 400
+
+
+def test_modificar_rellena_el_formulario(conn: psycopg.Connection, nombre_bd: str, limpio: None,
+                                         sin_acciones: None) -> None:
+    escenario(conn)
+    activo(conn)
+    calculo_a_mano(conn, AHORA, [(local(12, 2), local(12, 4), "necesaria", local(12, 9), False)])
+    html = get(nombre_bd, AHORA, f"/plan?modificar={local(12, 2).isoformat().replace('+', '%2B')}")
+    assert "Modificar franja" in html and 'value="02:00"' in html and 'value="04:00"' in html
+    assert f'name="anterior_inicio" value="{local(12, 2).isoformat()}"' in html

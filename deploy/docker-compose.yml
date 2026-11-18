@@ -55,7 +55,8 @@ services:
       TZ: Europe/Madrid
 
   # Muestreo del cargador (fase 2, etapa 1): misma imagen, proceso continuo
-  # separado de la descarga de precios. Solo lecturas (GET). Sin VIARIS_URL
+  # separado de la descarga de precios. Desde v0.7.0 también reconcilia el
+  # programador (escribe solo en modo activo; ver docs/fase2.md). Sin VIARIS_URL
   # queda en espera sin hacer nada.
   muestreo:
     image: ${HARBOR_REGISTRY}/${HARBOR_PROJECT:-energia}/collector:${COLLECTOR_TAG:-latest}

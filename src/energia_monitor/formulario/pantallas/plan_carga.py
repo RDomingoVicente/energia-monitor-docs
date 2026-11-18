@@ -1,7 +1,8 @@
-"""Plan de carga (formulario-maquetas.md, 7.9; maqueta 01d). Paso 3b: solo lectura.
+"""Plan de carga (formulario-maquetas.md, 7.9; maqueta 01d).
 
-Las acciones que escriben (modo, Cargar ahora, Detener, Modificar, Eliminar, Añadir franja) se muestran
-desactivadas con «disponible en el paso 3c». En sombra las franjas no se escriben: estados de sombra de 7.9.
+Desde el paso 3c las acciones (modo, Cargar ahora, Detener, Modificar, Eliminar, Añadir franja) se encolan en
+plan_accion: las ejecuta el muestreo al momento y la página muestra su resultado tras el PRG. En sombra las
+franjas no se escriben: estados de sombra de 7.9.
 La línea de tiempo se pinta con HTML y clases (la CSP no admite estilos en línea): q-N y n-N son la posición y
 el ancho en cuartos de hora dentro de la vista (lt-240: 60 h; lt-96: 24 h), h-N y b-N alturas en % de la escala
 0–0,60 €/kWh.
@@ -14,10 +15,37 @@ from decimal import Decimal
 
 from energia_monitor.formulario import formato as f
 from energia_monitor.formulario.html import Html, h, unir
+from energia_monitor.formulario.plantilla import banner
 from energia_monitor.formulario.plan_datos import ESCALA_EUR_KWH, Ahorro, FranjaPlan, Linea, PlanCarga
 from energia_monitor.tiempo import MADRID
 
-PASO_3C = "disponible en el paso 3c"
+from dataclasses import dataclass, field
+
+from energia_monitor.formulario.plan_datos import Accion
+
+
+@dataclass
+class FormFranja:
+    """Añadir o modificar una franja manual (hora de Madrid). anterior_*: la franja que se modifica."""
+
+    dia: str = ""
+    inicio: str = ""
+    fin: str = ""
+    anterior_inicio: str = ""
+    anterior_fin: str = ""
+    errores: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class FormModo:
+    errores: dict[str, str] = field(default_factory=dict)
+
+
+EN_SOMBRA = "Cambia a activo para usarlo."
+NOTA_SOMBRA = h('<p class="k paso">{}</p>', EN_SOMBRA)
+
+TIPO_ACCION = {"modo": "Cambio de modo", "cargar_ahora": "Cargar ahora", "detener": "Detener",
+               "modificar": "Modificar franja", "eliminar": "Eliminar franja", "anadir": "Franja manual"}
 MODOS = (
     ("sombra", "Calcula el plan y lo muestra, pero no escribe en el cargador"),
     ("activo", "Escribe sus franjas en el cargador y las mantiene al día"),
@@ -73,13 +101,15 @@ def _desglose(fr: FranjaPlan, corto: bool = False) -> Html:
                         TAG_NIVEL.get(nivel, "horario"), nivel, f.numero(kwh), cuando))
     if fr.provisional:
         lineas.append(Html('<span class="motivo"><span class="tag horario">provisional</span></span>'))
+    if fr.manual:
+        lineas.append(Html('<span class="motivo"><span class="tag estimado">fijada</span></span>'))
     return unir(lineas)
 
 
 # --- Panel de control ---------------------------------------------------------------------------
 
 
-def _control(d: PlanCarga) -> Html:
+def _control(d: PlanCarga, fm: FormModo) -> Html:
     if d.calculado is None:
         estado = Html('<p class="titulo-plan">Aún no hay plan</p><p class="sub">El planificador calcula en el servicio de '
                       'muestreo cada 15 minutos y con cada cambio; vuelve en unos minutos.</p>')
@@ -115,19 +145,26 @@ def _control(d: PlanCarga) -> Html:
             lineas.append(Html('<p class="sub m aviso">modo prudente: solo con el coche enchufado</p>'))
         lineas.append(h('<p class="k m">último cálculo {}</p>', f.cuando(d.calculado, d.ahora)))
         estado = unir(lineas)
-    opciones = unir(h('<label title="{}"><input type="radio" name="modo" value="{}" disabled{}>{}</label>', titulo, modo,
+    opciones = unir(h('<label title="{}"><input type="radio" name="modo" value="{}"{}>{}</label>', titulo, modo,
                       Html(" checked") if modo == d.modo else Html(""), modo) for modo, titulo in MODOS)
     nombre, frase = FRASE_MODO.get(d.modo, ("", ""))
+    error_modo = h('<p class="error-campo">{}</p>', fm.errores["confirmar"]) if "confirmar" in fm.errores else Html("")
     return h(
         '<section class="pn control-plan orden-1"><p class="pt solo-movil cabecera-control">Planificador <span class="tag '
         'estimado">{}</span></p><div class="estado-plan">{}</div>'
-        '<div class="modo-plan"><span class="k">Modo</span><div class="seg desactivado" role="radiogroup" '
-        'aria-label="Modo del planificador">{}</div><p class="k texto"><span class="destacado">{}</span> {}</p>'
-        '<p class="k paso">{}</p></div>'
-        '<div class="ahora-plan"><span class="k">Ignora el precio</span><button type="button" class="btn2" disabled '
-        'title="{}">Cargar ahora</button><p class="k texto">Hasta el objetivo de la próxima salida.</p>'
-        '<p class="k paso">{}</p></div></section>',
-        d.modo.upper(), estado, opciones, nombre, frase, PASO_3C, PASO_3C, PASO_3C)
+        '<form class="modo-plan" action="/plan/modo" method="post"><span class="k">Modo</span><div class="seg" '
+        'role="radiogroup" aria-label="Modo del planificador">{}</div><p class="k texto"><span class="destacado">{}</span> '
+        '{}</p><label class="k confirmar"><input type="checkbox" name="confirmar" value="si"> Para pasar a activo: '
+        'entiendo que escribirá en el cargador</label>{}<button type="submit" class="btn2">Aplicar</button></form>'
+        '<form class="ahora-plan" action="/plan/cargar-ahora" method="post"><span class="k">Ignora el precio</span>'
+        '<button type="submit" class="btn2"{}>Cargar ahora</button><p class="k texto">Hasta el objetivo de la próxima '
+        'salida.</p>{}</form></section>',
+        d.modo.upper(), estado, opciones, nombre, frase, error_modo, _desactivado(d), NOTA_SOMBRA if d.sombra else Html(""))
+
+
+def _desactivado(d: PlanCarga) -> Html:
+    """En sombra las acciones sobre franjas no se pueden usar: no se escribe nada en el cargador."""
+    return h(' disabled title="{}"', EN_SOMBRA) if d.sombra else Html("")
 
 
 # --- Línea de tiempo -----------------------------------------------------------------------------
@@ -140,6 +177,8 @@ def _altura(precio: Decimal) -> int:
 def _linea(d: PlanCarga, ln: Linea, movil: bool) -> Html:
     n = ln.cuartos
     bloques: list[Html] = []
+    # Etiqueta horaria (~80 px) solo si no pisa la anterior: en escritorio un cuarto mide ~3,7 px; en móvil, ~6.
+    separacion, ultima = (14 if movil else 24), -100
     for fr in ln.franjas:
         i, j = ln.indice(fr.inicio), ln.indice(fr.fin)
         if j <= i:
@@ -152,9 +191,12 @@ def _linea(d: PlanCarga, ln: Linea, movil: bool) -> Html:
             clase, texto, relleno = "provisional", "prov.", Html("")
         else:
             clase, texto, relleno = "programada", "", Html("")
-        bloques.append(h('<div class="lt-bloque {} q-{} n-{}">{}<span class="m">{}</span></div>'
-                         '<span class="lt-hor m q-{}">{}</span>', clase, i, j - i, relleno, texto, (i + j) // 2,
-                         _horario(fr.inicio, fr.fin)))
+        centro = (i + j) // 2
+        etiqueta = Html("")
+        if centro - ultima >= separacion:
+            etiqueta, ultima = h('<span class="lt-hor m q-{}">{}</span>', centro, _horario(fr.inicio, fr.fin)), centro
+        bloques.append(h('<div class="lt-bloque {} q-{} n-{}" title="{}">{}<span class="m">{}</span></div>{}', clase, i,
+                         j - i, _horario(fr.inicio, fr.fin), relleno, texto, etiqueta))
     barras: list[Html] = []
     for k, hr in enumerate(ln.horas):
         if hr.precio is None:
@@ -226,8 +268,10 @@ def _seccion_linea(d: PlanCarga) -> Html:
 # --- Franjas ---------------------------------------------------------------------------------------
 
 
-def _estado_cargador(d: PlanCarga) -> str:
-    return "no escrita (sombra)" if d.sombra else "pendiente"
+def _clase_estado(estado: str) -> str:
+    if estado.startswith("error"):
+        return "nivel-error"
+    return "leido" if estado == "confirmada" else "horario"
 
 
 def _nota_ejecucion(fr: FranjaPlan) -> str:
@@ -236,11 +280,20 @@ def _nota_ejecucion(fr: FranjaPlan) -> str:
     return ""
 
 
-def _acciones(fr: FranjaPlan) -> Html:
-    if fr.ejecucion != "programada":  # en curso: solo Detener
-        return h('<button type="button" class="del" disabled title="{}">Detener</button>', PASO_3C)
-    return h('<button type="button" class="mod" disabled title="{}">Modificar</button><button type="button" '
-             'class="del" disabled title="{}">Eliminar</button>', PASO_3C, PASO_3C)
+def _acciones(d: PlanCarga, fr: FranjaPlan) -> Html:
+    """En curso: solo Detener. Futuras: Modificar (formulario de franja manual) y Eliminar. En sombra, desactivadas."""
+    inicio, fin = fr.inicio.isoformat(), fr.fin.isoformat()
+    if d.sombra:
+        if fr.ejecucion != "programada":
+            return h('<button type="button" class="del"{}>Detener</button>', _desactivado(d))
+        return h('<button type="button" class="mod"{}>Modificar</button><button type="button" class="del"{}>Eliminar'
+                 '</button>', _desactivado(d), _desactivado(d))
+    if fr.ejecucion != "programada":
+        return h('<form action="/plan/franjas/detener" method="post"><input type="hidden" name="inicio" value="{}">'
+                 '<button type="submit" class="del">Detener</button></form>', inicio)
+    return h('<a href="/plan?modificar={}#manual" class="mod">Modificar</a><form action="/plan/franjas/eliminar" '
+             'method="post"><input type="hidden" name="inicio" value="{}"><input type="hidden" name="fin" value="{}">'
+             '<button type="submit" class="del">Eliminar</button></form>', inicio, inicio, fin)
 
 
 def _franjas(d: PlanCarga) -> Html:
@@ -249,7 +302,8 @@ def _franjas(d: PlanCarga) -> Html:
         energia = h('<span class="m fuerte">{} kWh</span><span class="m azul">{}</span><span class="m">{}</span>'
                     '<span class="k m">{}</span>', f.numero(fr.kwh), _pts(d, fr.kwh), _eur(fr.coste, fr.provisional),
                     _precio(fr.precio_medio))
-        ejecucion = h('<span class="tag horario">{}</span><span class="tag {}">{}</span>{}', _estado_cargador(d),
+        ejecucion = h('<span class="tag {}">{}</span><span class="tag {}">{}</span>{}', _clase_estado(fr.estado_cargador),
+                      fr.estado_cargador,
                       "leido" if "cargando" in fr.ejecucion else "horario", fr.ejecucion,
                       h('<span class="k m nota-ejecucion">{}</span>', _nota_ejecucion(fr))
                       if _nota_ejecucion(fr) else Html(""))
@@ -257,22 +311,24 @@ def _franjas(d: PlanCarga) -> Html:
         filas.append(h('<tr><td><span class="m">{}</span><br><span class="m">{}</span><br><span class="k m">{}{}</span>'
                        '</td><td class="motivos">{}</td><td class="r energia">{}</td><td class="ejecucion">{}</td>'
                        '<td class="r acciones-col">{}</td></tr>', f.dia(fr.inicio), _horario(fr.inicio, fr.fin),
-                       _duracion(fr.inicio, fr.fin), tareas, _desglose(fr), energia, ejecucion, _acciones(fr)))
+                       _duracion(fr.inicio, fr.fin), tareas, _desglose(fr), energia, ejecucion, _acciones(d, fr)))
         tarjetas.append(h('<div class="it-franja"><div class="fila"><span class="m">{} · {}</span><span class="m '
                           'fuerte">{} kWh</span></div><div class="motivos">{}</div><div class="fila"><span class="k m">'
-                          '{} · {} · {}</span><span class="tag {}">{}</span></div><div class="acciones-fila">{}</div>'
-                          '</div>', f.dia(fr.inicio), _horario(fr.inicio, fr.fin), f.numero(fr.kwh), _desglose(fr),
-                          _pts(d, fr.kwh), _eur(fr.coste, fr.provisional), _precio(fr.precio_medio),
-                          "leido" if "cargando" in fr.ejecucion else "horario", fr.ejecucion, _acciones(fr)))
+                          '{} · {} · {}</span><span class="tag {}">{}</span></div><div class="fila"><span class="tag {}">'
+                          '{}</span></div><div class="acciones-fila">{}</div></div>', f.dia(fr.inicio),
+                          _horario(fr.inicio, fr.fin), f.numero(fr.kwh), _desglose(fr), _pts(d, fr.kwh),
+                          _eur(fr.coste, fr.provisional), _precio(fr.precio_medio),
+                          "leido" if "cargando" in fr.ejecucion else "horario", fr.ejecucion,
+                          _clase_estado(fr.estado_cargador), fr.estado_cargador, _acciones(d, fr)))
     cuerpo = (h('<table class="fija franjas-plan"><colgroup><col class="c-franja"><col><col class="c-energia">'
                 '<col class="c-ejecucion"><col class="c-acciones"></colgroup><thead><tr><th>Franja</th><th>Motivo · kWh'
                 '</th><th class="r">Energía · coste</th><th>Cargador · ejecución</th><th class="r"><span class="oculto">Acciones'
                 '</span></th></tr></thead><tbody>{}</tbody></table>', unir(filas))
               if filas else Html('<p class="vacio">Sin cargas programadas.</p>'))
-    pie = Html('<p class="k texto pie-tabla">La franja en curso solo se puede detener; luego, eliminar. Una franja que '
+    pie = h('<p class="k texto pie-tabla">La franja en curso solo se puede detener; luego, eliminar. Una franja que '
                'cruza la medianoche se muestra como una sola y se escribe como 2 tareas. Al detener o eliminar una '
-               'franja automática, el planificador no la vuelve a crear en ese tramo. Las acciones estarán disponibles '
-               'en el paso 3c.</p>')
+               'franja automática, el planificador no la vuelve a crear en ese tramo.{}</p>', h(' En sombra: {}', EN_SOMBRA)
+               if d.sombra else Html(""))
     sombra = Html('<span class="tag estimado">SOMBRA</span>') if d.sombra else Html("")
     tareas = sum(x.tareas for x in d.franjas)
     resumen = h('<span class="cabecera-proximas">{}<span class="k m">{} franja{} · {} tarea{} de {}</span></span>', sombra,
@@ -311,18 +367,32 @@ def _pasadas(d: PlanCarga) -> Html:
 # --- Columna derecha -----------------------------------------------------------------------------------
 
 
-def _manual(d: PlanCarga) -> Html:
-    hoy = f"{f.local(d.ahora):%Y-%m-%d}"
-    # Sin action ni POST en 3b: el formulario de verdad llega en 3c.
-    return h('<section class="pn orden-4 desactivado"><div class="ph"><h2 class="pt">Añadir '
-             'franja manual</h2></div><fieldset disabled class="relleno"><div class="campo"><label for="fm-dia" '
-             'class="k">Día</label><input id="fm-dia" class="inp" type="date" value="{}"></div><div class="dos"><div '
-             'class="campo"><label for="fm-ini" class="k">Inicio</label><input id="fm-ini" class="inp" type="time" '
-             'step="900"></div><div class="campo"><label for="fm-fin" class="k">Fin</label><input id="fm-fin" '
-             'class="inp" type="time" step="900"></div></div><p class="k texto">Se envía al cargador al guardar y se '
-             'confirma leyéndolo de vuelta. No puede solaparse con otra tarea activa: si choca, se indica con cuál. El '
-             'planificador la respeta y no la mueve.</p><button type="button" class="btn">Añadir franja</button>'
-             '<p class="k paso">{}</p></fieldset></section>', hoy, PASO_3C)
+def _manual(d: PlanCarga, form: FormFranja) -> Html:
+    def error(campo: str) -> tuple[Html, Html]:
+        if campo in form.errores:
+            return (h(' aria-invalid="true" aria-describedby="error-f-{}"', campo),
+                    h('<p class="error-campo" id="error-f-{}">{}</p>', campo, form.errores[campo]))
+        return Html(""), Html("")
+    di_a, di_e = error("dia")
+    in_a, in_e = error("inicio")
+    fi_a, fi_e = error("fin")
+    general = h('<p class="error-campo">{}</p>', form.errores["general"]) if "general" in form.errores else Html("")
+    modificar = bool(form.anterior_inicio)
+    titulo = "Modificar franja" if modificar else "Añadir franja manual"
+    return h('<form class="pn orden-4" id="manual" action="/plan/franjas" method="post"><div class="ph"><h2 class="pt">{}'
+             '</h2></div><fieldset class="relleno"{}>{}<input type="hidden" name="anterior_inicio" value="{}"><input '
+             'type="hidden" name="anterior_fin" value="{}"><div class="campo"><label for="fm-dia" class="k">Día</label>'
+             '<input id="fm-dia" name="dia" class="inp" type="date" required value="{}"{}>{}</div><div class="dos"><div '
+             'class="campo"><label for="fm-ini" class="k">Inicio</label><input id="fm-ini" name="inicio" class="inp" '
+             'type="time" step="900" required value="{}"{}>{}</div><div class="campo"><label for="fm-fin" class="k">Fin'
+             '</label><input id="fm-fin" name="fin" class="inp" type="time" step="900" required value="{}"{}>{}</div>'
+             '</div><p class="k texto">Se envía al cargador al guardar y se confirma leyéndolo de vuelta. No puede '
+             'solaparse con otra tarea activa: si choca, se indica con cuál. El planificador la respeta y no la mueve. '
+             'Un fin anterior al inicio es del día siguiente (cruza la medianoche).</p><button type="submit" '
+             'class="btn">{}</button>{}</fieldset></form>',
+             titulo, Html(" disabled") if d.sombra else Html(""), general, form.anterior_inicio, form.anterior_fin, form.dia or f"{f.local(d.ahora):%Y-%m-%d}", di_a,
+             di_e, form.inicio, in_a, in_e, form.fin, fi_a, fi_e, "Guardar cambios" if modificar else "Añadir franja",
+             NOTA_SOMBRA if d.sombra else Html(""))
 
 
 def _ahorro(d: PlanCarga) -> Html:
@@ -346,16 +416,44 @@ def _ahorro(d: PlanCarga) -> Html:
              'relleno-x">{}</p></section>', plan_th, unir(fila(a) for a in d.ahorro), unir(notas, " "))
 
 
-def _tareas() -> Html:
-    return h('<section class="pn orden-6"><div class="ph"><h2 class="pt">Tareas en el cargador</h2><span class="k m paso">'
-             'paso 3c</span></div><p class="k texto relleno-x">{}: la lectura del programador llega en el paso 3c. En '
-             'sombra el plan no tiene en cuenta las tareas de la app de Orbis (E3.4). La guardiana evita que el cargador '
-             'cargue libremente si no queda ninguna tarea activa. No edites desde la app las tareas del planificador.'
-             '</p></section>', PASO_3C.capitalize())
+def _tareas(d: PlanCarga) -> Html:
+    texto = Html('La guardiana evita que el cargador cargue libremente si no queda ninguna tarea activa. No edites desde '
+                 'la app las tareas del planificador: la app las convierte en semanales.')
+    if d.tareas_cargador is None:
+        return h('<section class="pn orden-6"><div class="ph"><h2 class="pt">Tareas en el cargador</h2></div>'
+                 '<p class="k texto relleno-x">Aún sin lectura del programador. {}</p></section>', texto)
+    filas = unir(h('<div class="it-tarea"><div><p class="m"><span class="tenue">#{}</span> <span class="tag {}">{}</span>'
+                   '</p><p class="k m">{}</p></div><span class="tag {}">{}</span></div>', t.id,
+                   {"planificador": "info", "manual": "estimado", "guardiana": "sin-salida"}.get(t.origen, "horario"),
+                   t.origen, t.programacion, "leido" if t.estado != "inactiva" else "horario", t.estado)
+                 for t in d.tareas_cargador)
+    libres = ", ".join(map(str, d.libres)) or "ninguno"
+    leida = f" Leído {f.cuando(d.lectura_en, d.ahora)}." if d.lectura_en else ""
+    return h('<section class="pn orden-6"><div class="ph"><h2 class="pt">Tareas en el cargador</h2><span class="k m">{} de '
+             '10</span></div><div class="lista-tareas">{}</div><p class="k texto relleno-x">Libres: {}. {}{}</p>'
+             '</section>', len(d.tareas_cargador), filas, libres, texto, leida)
 
 
-def pantalla(d: PlanCarga) -> Html:
-    return h('<div class="plan-carga">{}{}<div class="columnas-plan"><div class="col">{}{}</div><div class="col lateral">'
-             '{}{}{}</div></div></div>', _control(d), _seccion_linea(d), _franjas(d), _pasadas(d), _manual(d),
-             _ahorro(d), _tareas())
+def _resultado(a: Accion | None) -> Html:
+    """Banner tras el PRG (?ok=accion&id=N): pendiente, hecha o error, con «Reintentar» si falló Detener."""
+    if a is None:
+        return Html("")
+    tipo = TIPO_ACCION.get(a.tipo, a.tipo)
+    if a.estado == "pendiente":
+        return banner("info", f"{tipo}: enviada al cargador. Recarga en unos segundos para ver la confirmación.")
+    if a.estado == "hecha":
+        return banner("ok", f"{tipo}: {a.resultado}.")
+    reintentar = Html("")
+    if a.tipo == "detener" and isinstance(a.datos.get("inicio"), str):
+        reintentar = h('<form action="/plan/franjas/detener" method="post" class="reintentar"><input type="hidden" '
+                       'name="inicio" value="{}"><button type="submit" class="del">Reintentar</button></form>',
+                       a.datos["inicio"])
+    return h('<div class="banners">{}{}</div>', banner("error", f"{tipo}: {a.resultado}"), reintentar)
+
+
+def pantalla(d: PlanCarga, form: FormFranja | None = None, fm: FormModo | None = None) -> Html:
+    form = form or FormFranja()
+    return h('<div class="plan-carga">{}{}{}<div class="columnas-plan"><div class="col">{}{}</div><div class="col lateral">'
+             '{}{}{}</div></div></div>', _resultado(d.ultima_accion), _control(d, fm or FormModo()), _seccion_linea(d),
+             _franjas(d), _pasadas(d), _manual(d, form), _ahorro(d), _tareas(d))
 

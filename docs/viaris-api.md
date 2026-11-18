@@ -256,6 +256,32 @@ cargador (+0,08 %), y el servicio `muestreo` del NAS, con 180 muestras,
 13.624 Wh (−0,31 %). La energía de la casa no es fiable durante una carga
 (`homePower` = 0, ver "Potencias del modulador") y sigue como no verificada.
 
+## Uso en el código (etapa 3, paso 3c)
+
+El cliente añade a su lista cerrada, también por comparación exacta:
+
+| Petición | Uso |
+|----------|-----|
+| `GET /modules/scheduler/elements?level=cfg` | lectura del programador (antes de reconciliar y tras cada escritura) |
+| `POST /modules/scheduler/elements/mennekes` | tarea propia nueva en un id libre |
+| `PUT /modules/scheduler/elements/mennekes` | tarea propia completa (activar, desactivar, mover) |
+| `DELETE /modules/scheduler/elements/mennekes` | `{"tasks":[{"id":N}]}` de una tarea propia |
+
+`ClienteViaris.escribir` valida el cuerpo antes de conectar: una tarea, id
+1–10 y dentro de los ids propios que le pasa el llamador
+(`planificador_tarea`), tipo 0, `active` 0/1, con fecha (`weekday` 0, `day`
+y `month` con un único bit), una franja que no cruza la medianoche. Las
+tareas ajenas (5 y 6 de la app) y la guardiana solo se leen; la guardiana
+solo se crea, se activa o se corrige, nunca se desactiva ni se borra.
+Cada escritura queda en `plan_auditoria` (cuerpo, resultado, respuesta).
+
+En sombra no se escribe: se lee el programador y se registra en la
+auditoría, con `en_seco`, lo que se habría escrito.
+
+Sin verificar contra el cargador real (pruebas a mano antes de activar):
+`POST` sobre un id ya ocupado (¿sobrescribe o da error?) y el `PUT` con la
+tarea completa tal como la devuelve la lectura.
+
 ## Rutas que el código no debe usar
 
 - `POST /reset/sys`: reinicio y restauración de fábrica.

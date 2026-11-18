@@ -44,6 +44,9 @@
 - planificador simular --dia AAAA-MM-DD [--desde HH:MM]: plan calculado al
   enchufar ese día (o a esa hora) y su coste frente al real y a cargar al
   enchufar en esa conexión. No guarda nada ni toca el cargador.
+- planificador modo activo|sombra|pausa | tareas | reconciliar --en-seco |
+  limpiar --confirmar | guardiana --id N --confirmar: paso 3c, hablan con el
+  cargador (contenedor muestreo, con VIARIS_URL).
 
 recargar, esios recargar, esios estimar y parametro registrar (de contrato)
 refrescan mv_precio_final al terminar.
@@ -154,6 +157,18 @@ def _parser() -> argparse.ArgumentParser:
     simular = sub_plan.add_parser("simular", help="plan al enchufar un día pasado y su coste frente al real")
     simular.add_argument("--dia", type=date.fromisoformat, required=True)
     simular.add_argument("--desde", help="HH:MM local; por defecto, el primer enchufe del día desde las 12:00")
+    # Paso 3c: hablan con el cargador; en el contenedor muestreo (VIARIS_URL).
+    cambiar = sub_plan.add_parser("modo", help="cambia el modo (lo aplica el muestreo al momento)")
+    cambiar.add_argument("modo", choices=("sombra", "activo", "pausa"))
+    cambiar.add_argument("--nota")
+    sub_plan.add_parser("tareas", help="lee el programador: guardiana, tareas propias y ajenas")
+    reconciliar = sub_plan.add_parser("reconciliar", help="lo que escribiría ahora en el cargador, sin escribir")
+    reconciliar.add_argument("--en-seco", action="store_true", required=True)
+    limpiar = sub_plan.add_parser("limpiar", help="pasa a sombra y borra las tareas propias salvo la guardiana")
+    limpiar.add_argument("--confirmar", action="store_true", required=True)
+    guardiana = sub_plan.add_parser("guardiana", help="traslada la tarea guardiana a otro id libre")
+    guardiana.add_argument("--id", type=int, required=True)
+    guardiana.add_argument("--confirmar", action="store_true", required=True)
     return parser
 
 
@@ -342,9 +357,30 @@ def _parametro(args: argparse.Namespace) -> int:
 
 
 def _planificador(args: argparse.Namespace) -> int:
+    from energia_monitor.plan_carga import cli as plan_cli
     from energia_monitor.plan_carga import informe
     from energia_monitor.plan_carga import servicio as plan_servicio
 
+    if args.accion in ("modo", "tareas", "reconciliar", "limpiar", "guardiana"):
+        config = Config.desde_entorno()
+        cliente = _cliente_viaris(config)
+        with db.conectar() as conn:
+            ahora = datetime.now(UTC)
+            if args.accion == "modo":
+                lineas = plan_cli.modo(conn, args.modo, args.nota)
+            elif cliente is None:
+                log.error("sin VIARIS_URL: ejecútalo en el contenedor muestreo")
+                return 1
+            elif args.accion == "tareas":
+                lineas = plan_cli.tareas(conn, cliente, ahora)
+            elif args.accion == "reconciliar":
+                lineas = plan_cli.en_seco(conn, cliente, ahora)
+            elif args.accion == "limpiar":
+                lineas = plan_cli.limpiar(conn, cliente, ahora)
+            else:
+                lineas = plan_cli.guardiana(conn, cliente, ahora, args.id)
+        print("\n".join(lineas))
+        return 1 if any(x.startswith("ERROR") or x.startswith("No se pudo") for x in lineas) else 0
     with db.conectar() as conn:
         if args.accion == "plan":
             try:

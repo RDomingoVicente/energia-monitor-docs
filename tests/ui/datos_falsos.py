@@ -224,14 +224,18 @@ def _franjas() -> list[pd.FranjaPlan]:
     curso = pd.FranjaPlan((hoy + timedelta(hours=17)).astimezone(UTC), (hoy + timedelta(hours=23)).astimezone(UTC),
                           D("27.0"), False, 1, True, D("0.154"), D("4.86"),
                           (("necesaria", salida, D("7.4")), ("margen", salida, D("0.7")), ("oportunista", None, D("18.9"))),
-                          "en su horario · coche cargando", D("12.4"))
+                          "en su horario · coche cargando", D("12.4"), False, "confirmada")
     noche = pd.FranjaPlan((hoy + timedelta(days=1, hours=23)).astimezone(UTC),
                           (hoy + timedelta(days=2, hours=2, minutes=30)).astimezone(UTC), D("15.8"), True, 2, False,
-                          D("0.231"), D("4.09"), (("necesaria", salida + timedelta(days=1), D("15.8")),), "programada")
+                          D("0.231"), D("4.09"), (("necesaria", salida + timedelta(days=1), D("15.8")),), "programada", None,
+                          False, "error · el cargador no respondió (tiempo de espera agotado)")
     lejos = pd.FranjaPlan((hoy + timedelta(days=2, hours=14)).astimezone(UTC),
                           (hoy + timedelta(days=2, hours=15)).astimezone(UTC), D("4.5"), True, 1, False, D("0.190"),
-                          D("0.86"), (("oportunista", None, D("4.5")),), "programada")
-    return [curso, noche, lejos]
+                          D("0.86"), (("oportunista", None, D("4.5")),), "programada", None, False, "pendiente")
+    manual = pd.FranjaPlan((hoy + timedelta(days=2, hours=4)).astimezone(UTC),
+                           (hoy + timedelta(days=2, hours=5)).astimezone(UTC), D("7.4"), False, 1, False, None, None,
+                           (("manual", None, D("7.4")),), "programada", None, True, "confirmada")
+    return [curso, noche, manual, lejos]
 
 
 def _linea(desde: datetime, horas: int, franjas: list[pd.FranjaPlan], salidas: list[datetime]) -> pd.Linea:
@@ -261,13 +265,27 @@ def plan_carga(_conn: object, _ahora: object) -> pd.PlanCarga:
     ahorro = [pd.Ahorro("hoy", 1, D("1.86"), D("1.52"), D("0.10"), D("3.10"), 0),
               pd.Ahorro("7 días", 5, D("14.20"), D("11.95"), D("0.80"), D("22.40"), 0),
               pd.Ahorro("30 días", 5, D("14.20"), D("11.95"), D("0.80"), D("22.40"), 0)]
-    return pd.PlanCarga(AHORA, "sombra", AHORA - timedelta(minutes=4), True, True, D("91.3"), D("0.86"), D("50.2"),
-                        D("71.5"), D("0.211"), D(60), 7, D(80), 7, franjas[-1].fin, salidas, franjas, pasadas, ahorro,
-                        _linea(hoy, 60, franjas, instantes), _linea(hora, 24, franjas, instantes))
+    d_ = pd.PlanCarga(AHORA, "activo", AHORA - timedelta(minutes=4), True, True, D("91.3"), D("0.86"), D("50.2"),
+                      D("71.5"), D("0.211"), D(60), 7, D(80), 7, franjas[-1].fin, salidas, franjas, pasadas, ahorro,
+                      _linea(hoy, 60, franjas, instantes), _linea(hora, 24, franjas, instantes))
+    d_.tareas_cargador = [pd.TareaCargador(1, "planificador", "17/11 17:00 · 6 h", "en curso"),
+                          pd.TareaCargador(2, "planificador", "18/11 23:00 · 1 h", "activa"),
+                          pd.TareaCargador(3, "manual", "19/11 04:00 · 1 h", "activa"),
+                          pd.TareaCargador(5, "app Orbis", "M 23:00 · 59 min", "inactiva"),
+                          pd.TareaCargador(6, "app Orbis", "X 00:00 · 8 h", "inactiva"),
+                          pd.TareaCargador(9, "guardiana", "31/12 00:00 · 1 min", "activa")]
+    d_.lectura_en = AHORA - timedelta(minutes=1)
+    d_.libres = [4, 7, 8, 10]
+    return d_
+
+
+def accion(_conn: object, ident: int) -> pd.Accion:
+    return pd.Accion(ident, "detener", "error", "No se pudo detener: el cargador no respondió (tiempo de espera "
+                     "agotado). Pulsa «Reintentar».", {"inicio": _franjas()[0].inicio.isoformat()})
 
 
 def proximas_cargas(_conn: object, _ahora: object, n: int = 3) -> tuple[str, list[pd.FranjaPlan]]:
-    return "sombra", _franjas()[:n]
+    return "activo", _franjas()[:n]
 
 
 def parametro_registrado(_conn: object, _id: int) -> tuple[str, D, date, str] | None:
@@ -298,4 +316,5 @@ def instalar(monkeypatch: Any) -> None:
     monkeypatch.setattr(d, "version_bd", lambda _conn: "9999")
     monkeypatch.setattr(pd, "plan_carga", plan_carga)
     monkeypatch.setattr(pd, "proximas_cargas", proximas_cargas)
+    monkeypatch.setattr(pd, "accion", accion)
     monkeypatch.setattr(d, "lectura_guardada", lambda _conn, _id: None)

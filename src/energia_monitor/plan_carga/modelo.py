@@ -63,8 +63,10 @@ class Salida:
 class Ocupado:
     """Otra tarea activa del cargador (E3.4, sin solapes).
 
-    origen: «ajena» (app de Orbis u otra no registrada) o «manual» (fijada en el
-    formulario, 3c). tarea: id en el cargador.
+    origen: «ajena» (app de Orbis u otra no registrada; solo se respeta en activo),
+    «manual» (fijada en el formulario), «congelada» (franja propia que empieza
+    antes de congelar_franja_min) o «bloqueo» (tramo detenido o eliminado: se
+    respeta pero no carga). tarea: id en el cargador.
     """
 
     inicio: datetime

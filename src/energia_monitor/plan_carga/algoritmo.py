@@ -84,8 +84,10 @@ class _Planificador:
             return "probable"
         return None
 
-    def _respetados(self) -> list[tuple[datetime, datetime]]:
-        return [(o.inicio, o.fin) for o in self.e.ocupados if o.origen != "ajena" or self.e.respetar_ajenas]
+    def _respetados(self, con_energia: bool = False) -> list[tuple[datetime, datetime]]:
+        """Tramos que el plan no puede usar; con_energia: solo los que cargan (un bloqueo no carga)."""
+        return [(o.inicio, o.fin) for o in self.e.ocupados
+                if (o.origen != "ajena" or self.e.respetar_ajenas) and not (con_energia and o.origen == "bloqueo")]
 
     def _candidato(self, q: datetime) -> bool:
         c = self.cuartos[q]
@@ -107,7 +109,7 @@ class _Planificador:
                 if fin > self.e.ahora:
                     resto = Decimal((fin - max(c.inicio, self.e.ahora)).total_seconds()) / 900
                     fijos.append((max(c.inicio, self.e.ahora), c.kwh * resto * self.p.factor_bateria))
-        for inicio, fin in self._respetados():
+        for inicio, fin in self._respetados(con_energia=True):
             for q, c in self.cuartos.items():
                 if q >= self.e.ahora and self.ventana(q) and fr.solapa(q, c.fin, inicio, fin):
                     horas = Decimal((min(c.fin, fin) - max(q, inicio)).total_seconds()) / 3600

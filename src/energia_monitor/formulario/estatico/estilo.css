@@ -379,7 +379,16 @@ details.grupo-param > summary::-webkit-details-marker { display: none; }
 .franjas-plan td { vertical-align: top; font-size: 12px; }
 .ejecucion .tag { display: inline-block; margin: 0 4px 4px 0; white-space: normal; }
 .nota-ejecucion { display: block; margin-top: 2px; }
-.acciones-col button { display: flex; margin: 0 0 4px auto; }
+.acciones-col form { margin: 0; }
+.acciones-col button, .acciones-col a { display: flex; width: max-content; margin: 0 0 4px auto; }
+.modo-plan, .ahora-plan { margin: 0; }
+.modo-plan .confirmar { display: flex; gap: 6px; align-items: flex-start; }
+.modo-plan .btn2, .ahora-plan .btn2 { align-self: flex-start; }
+.reintentar { margin: 0; }
+.lista-tareas .it-tarea { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 14px;
+  border-top: 1px solid var(--borde-suave); }
+.lista-tareas .it-tarea:first-child { border-top: 0; }
+.lista-tareas .it-tarea p { margin: 0; } .lista-tareas .tenue { color: var(--texto-3); }
 .it-franja { padding: 12px 14px; border-top: 1px solid var(--borde-suave); display: flex; flex-direction: column; gap: 8px; }
 .it-franja:first-of-type { border-top: 0; }
 .it-franja .fila { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }

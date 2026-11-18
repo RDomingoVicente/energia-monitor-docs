@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,8 @@ from decimal import Decimal
 import psycopg
 
 from energia_monitor import bateria_servicio, db
+from energia_monitor.plan_carga import acciones as plan_acciones
+from energia_monitor.plan_carga import escritura as plan_escritura
 from energia_monitor.plan_carga.servicio import Ciclo as CicloPlan
 from energia_monitor.tiempo import MADRID, limites_dia_utc
 from energia_monitor.viaris import CONECTOR, ClienteViaris, ErrorCargador, EstadoConector, Modulador, Sesion
@@ -225,7 +228,24 @@ class Muestreador:
         # aunque no cambie nada más.
         bateria_servicio.actualizar_avisos_sin_fallar(conn)
         if self.plan is not None:
-            self.plan.ejecutar(conn, instante, evento)
+            self.planificar(conn, instante, evento)
+
+    def planificar(self, conn: psycopg.Connection, instante: datetime, evento: str | None) -> None:
+        """Paso 3c: acciones pendientes del formulario, recálculo del plan y, si hay plan nuevo o acciones,
+        reconciliación con el programador (en sombra, en seco). Nunca propaga un fallo al muestreo."""
+        assert self.plan is not None
+        acciones_hechas = 0
+        try:
+            acciones_hechas = plan_acciones.procesar(conn, self.cliente, instante)
+        except Exception:  # noqa: BLE001
+            log.exception("fallo al procesar las acciones del planificador")
+        ident = self.plan.ejecutar(conn, instante, evento or ("acción del formulario" if acciones_hechas else None))
+        if ident is None and not acciones_hechas:
+            return
+        try:
+            plan_escritura.reconciliar_y_escribir(conn, self.cliente, instante)
+        except Exception:  # noqa: BLE001
+            log.exception("fallo al reconciliar el plan con el cargador")
 
     def leer_historico(self, conn: psycopg.Connection, instante: datetime) -> bool:
         """Lee y guarda el histórico; True si hay sesiones nuevas o modificadas."""
@@ -265,6 +285,7 @@ def ejecutar(
         bateria_servicio.recalcular_sin_fallar(conn, "arranque del muestreo")
     log.info("muestreo del cargador en %s cada %d s", cliente.base, INTERVALO_S)
     muestreador = Muestreador(cliente, reloj, plan=CicloPlan())
+    escucha = _escuchar(conectar)
     while not stop.is_set():
         inicio = reloj()
         try:
@@ -274,7 +295,42 @@ def ejecutar(
             # Fallo de base de datos u otro imprevisto: siguiente ciclo.
             log.exception("fallo en el ciclo de muestreo")
         transcurrido = (reloj() - inicio).total_seconds()
-        stop.wait(max(INTERVALO_S - transcurrido, 1))
+        escucha = _esperar(escucha, conectar, stop, max(INTERVALO_S - transcurrido, 1))
+    if escucha is not None:
+        escucha.close()
+
+
+def _escuchar(conectar: Callable[[], psycopg.Connection]) -> psycopg.Connection | None:
+    """Conexión que escucha NOTIFY planificador (acciones del formulario). None si no se puede."""
+    try:
+        conn = conectar()
+        conn.execute("LISTEN planificador")
+        return conn
+    except psycopg.Error:
+        log.warning("sin LISTEN planificador: las acciones del formulario se atienden en el ciclo siguiente")
+        return None
+
+
+def _esperar(escucha: psycopg.Connection | None, conectar: Callable[[], psycopg.Connection],
+             stop: threading.Event, segundos: float) -> psycopg.Connection | None:
+    """Espera hasta el ciclo siguiente o hasta un NOTIFY (una acción del formulario: se atiende al momento).
+    La tabla plan_accion es la cola; el aviso solo despierta."""
+    if escucha is None:
+        stop.wait(segundos)
+        return _escuchar(conectar)
+    fin = time.monotonic() + segundos
+    try:
+        while not stop.is_set() and time.monotonic() < fin:
+            for _ in escucha.notifies(timeout=min(1.0, max(fin - time.monotonic(), 0.01)), stop_after=1):
+                return escucha
+    except psycopg.Error:
+        log.warning("se perdió la conexión de LISTEN planificador; se reabre")
+        try:
+            escucha.close()
+        except psycopg.Error:
+            pass
+        return _escuchar(conectar)
+    return escucha
 
 
 # --- Diagnóstico -----------------------------------------------------------------

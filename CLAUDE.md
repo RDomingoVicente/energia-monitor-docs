@@ -55,8 +55,17 @@ Antes de cualquier cambio, leer:
   cargador**; desplegado y aceptado en el NAS el 18/11/2026. Paso 3b
   (v0.6.1, migración 0021): Plan de carga, Próximas cargas en Inicio,
   Parámetros por grupos, Ayuda y navegación, solo lectura (maquetas 01d,
-  01a–01c y 05). Después, una semana en sombra y el paso 3c. Tareas del cargador hoy: 5 y 6 del usuario
-  (app de Orbis, inactivas) y 9, la guardiana; el código no toca ninguna.
+  01a–01c y 05), desplegado el 18/11/2026. Paso 3c (v0.7.0, migración
+  0022): escritura y reconciliación (`plan_carga/escritura.py`,
+  `reconciliar.py`, `acciones.py`), cola `plan_accion` con NOTIFY al muestreo,
+  acciones en Plan de carga y CLI `planificador modo|tareas|reconciliar
+  --en-seco|limpiar|guardiana` (en el contenedor `muestreo`); en sombra
+  las acciones manuales están desactivadas. Sigue en sombra: no se activa
+  antes del 25/11/2026 y tras revisar `v_plan_ahorro` de la semana (E3.11);
+  antes, simulación en seco y pruebas de escritura a mano
+  (docs/tareas/etapa-3-planificador.md, «Paso 3c»). Tareas del cargador hoy: 5 y 6 del usuario
+  (app de Orbis, inactivas) y 9, la guardiana; el código nunca toca la 5
+  ni la 6, y la guardiana solo la crea, activa o corrige.
   Después de la etapa 3, calibración con Datadis (docs/fase2.md).
 
 ## Estructura
@@ -97,7 +106,9 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0022).
+  migración nueva. La 0022 no está publicada hasta desplegar v0.7.0 (se
+  puede corregir actualizando su hash en tests/test_migraciones.py); la
+  siguiente es la 0023.
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de
@@ -113,9 +124,9 @@ El cargador es un equipo físico en producción, sin autenticación.
 
 - Todo acceso pasa por el cliente del cargador, que comprueba método y ruta
   contra una lista cerrada. Nada de peticiones HTTP sueltas.
-- Hasta el paso 3c de la etapa 3 solo se permiten los GET del muestreo. En
-  3c entran el GET del programador y las escrituras, limitadas a
-  `/modules/scheduler/elements/<conector>`.
+- Desde el paso 3c, además de los GET del muestreo, el GET del programador
+  y las escrituras, limitadas a `/modules/scheduler/elements/mennekes` y a
+  las tareas propias registradas en `planificador_tarea`.
 - Rutas prohibidas siempre: `/reset/sys`, `/modules/network`, y cualquier
   escritura en ocpp, mqtt_user, solar, spl, modbus, `/elements` y `/device`.
 - No registrar en logs las respuestas de `/modules/network` ni de

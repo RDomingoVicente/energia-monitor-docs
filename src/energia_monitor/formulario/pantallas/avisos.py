@@ -9,7 +9,8 @@ from energia_monitor.formulario.html import Html, h, unir
 ACCIONES = {"lectura": ("/#lectura", "Anotar lectura →"), "historial": ("/historial", "Revisar en Historial →"),
             "carga_externa": ("/carga-externa", "Registrar carga externa →"),
             "excepciones": ("/excepciones", "Revisar excepciones →"),
-            "parametros": ("/parametros?clave=factor_bateria#cambiar", "Revisar en Parámetros →")}
+            "parametros": ("/parametros?clave=factor_bateria#cambiar", "Revisar en Parámetros →"),
+            "plan": ("/plan", "Revisar en Plan de carga →")}
 CATALOGO = (
     ("error", "Cargador no accesible · Base de datos no accesible",
      "Inmediato. Se resuelve solo al recuperarse (la página no consulta el cargador: mira la última muestra)."),
