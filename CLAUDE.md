@@ -52,9 +52,10 @@ Antes de cualquier cambio, leer:
   cargador del 17 y 18/11 (docs/viaris-api.md). Paso 3a (v0.6.0, migración
   0020): modelo, disponibilidad, algoritmo (`plan_carga/`), modo sombra en
   el muestreo y CLI `planificador plan` y `simular`, **sin escrituras en el
-  cargador**; pendiente de desplegar y aceptar en el NAS. 3b no empieza
-  hasta que estén en el repo las maquetas de la etapa 3
-  (docs/formulario-maquetas.md). Tareas del cargador hoy: 5 y 6 del usuario
+  cargador**; desplegado y aceptado en el NAS el 18/11/2026. **Paso actual:
+  3b** (pantalla Plan de carga, Próximas cargas en Inicio, Parámetros por
+  grupos, Ayuda y navegación; solo lectura), con las maquetas de
+  docs/formulario-maquetas.md y docs/maquetas/ (01d, 01a–01c, 05). Tareas del cargador hoy: 5 y 6 del usuario
   (app de Orbis, inactivas) y 9, la guardiana; el código no toca ninguna.
   Después de la etapa 3, calibración con Datadis (docs/fase2.md).
 
