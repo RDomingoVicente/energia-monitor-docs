@@ -22,8 +22,8 @@ Antes de cualquier cambio, leer:
   Migración 0013: tabla `energia_tramo`, que mantiene el muestreo (tras
   cambiar muestras por SQL, `cargador recalcular`), y casa desconocida (NULL)
   en los tramos con carga.
-- Fase 2 en curso, por etapas (docs/fase2.md). **Etapa actual: 2, batería y
-  previsión** (tarea: docs/tareas/etapa-2-bateria.md, cuatro pasos que se
+- Fase 2 en curso, por etapas (docs/fase2.md). Etapa 2, batería y
+  previsión (tarea: docs/tareas/etapa-2-bateria.md, cuatro pasos que se
   revisan uno a uno). Paso 1 hecho: dashboards separados por tema
   (`grafana/energia-precios.json` y `grafana/energia-coche.json`). Paso 2
   hecho (v0.5.0): migración 0014 (nivel de batería, trayectos,
@@ -44,12 +44,21 @@ Antes de cualquier cambio, leer:
   v0.5.7: migración 0018 (trayecto partido en los eventos: total y parte
   real) y estado del coche (conectado/cargando/sin cargar desde). Paso 4
   aceptado en el NAS el 16/11/2026. v0.5.8: migración 0019 (cargas con la
-  energía medida y la estimada a batería). La etapa 3 no se empieza hasta
-  nuevo aviso; después, calibración con Datadis (docs/fase2.md).
+  energía medida y la estimada a batería). Falta la aceptación final de la
+  etapa 2.
+- **Etapa actual: 3, planificador de carga**, autorizada el 18/11/2026
+  (sección «Etapa 3» de docs/fase2.md; tarea: docs/tareas/etapa-3-planificador.md;
+  pasos 3a a 3d que se revisan uno a uno). Paso 3.0 hecho: pruebas del
+  cargador del 17 y 18/11 (docs/viaris-api.md). **Paso actual: 3a** (modelo,
+  disponibilidad, algoritmo, modo sombra y CLI `planificador`), **sin
+  escrituras en el cargador**. Tareas del cargador hoy: 5 y 6 del usuario
+  (app de Orbis, inactivas) y 9, la guardiana; el código no toca ninguna.
+  Después de la etapa 3, calibración con Datadis (docs/fase2.md).
 
 ## Estructura
 
-- src/energia_monitor/   código del colector (formulario/: página de batería por HTTPS)
+- src/energia_monitor/   código del colector (formulario/: página de batería por HTTPS;
+                         plan_carga/: planificador de carga; planificador.py es el bucle del colector)
 - tests/                 pytest, con respuestas reales guardadas como fixtures
 - db/migrations/         migraciones SQL versionadas (NNNN_descripcion.sql)
 - grafana/               dashboards en JSON (uno por tema) y notas del datasource
@@ -79,7 +88,7 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva (la siguiente es la 0020).
+  migración nueva (la siguiente es la 0021).
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de
@@ -95,8 +104,9 @@ El cargador es un equipo físico en producción, sin autenticación.
 
 - Todo acceso pasa por el cliente del cargador, que comprueba método y ruta
   contra una lista cerrada. Nada de peticiones HTTP sueltas.
-- En la etapa 1 solo se permiten GET. Las escrituras llegan en la etapa 3 y
-  se limitan a `/modules/scheduler/elements/<conector>`.
+- Hasta el paso 3c de la etapa 3 solo se permiten los GET del muestreo. En
+  3c entran el GET del programador y las escrituras, limitadas a
+  `/modules/scheduler/elements/<conector>`.
 - Rutas prohibidas siempre: `/reset/sys`, `/modules/network`, y cualquier
   escritura en ocpp, mqtt_user, solar, spl, modbus, `/elements` y `/device`.
 - No registrar en logs las respuestas de `/modules/network` ni de

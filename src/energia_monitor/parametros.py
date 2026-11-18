@@ -10,9 +10,10 @@ Los valores históricos nunca se modifican.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import psycopg
 from psycopg import sql
@@ -23,6 +24,45 @@ ORIGENES = ("contrato", "regulado", "estimado")
 
 class ErrorParametro(Exception):
     pass
+
+
+# Unidad «hora» de bateria_parametro_clave (0020): minutos desde las 00:00
+# locales, que se muestran y se escriben HH:MM.
+UNIDAD_HORA = "hora"
+_HHMM = re.compile(r"(\d{1,2}):(\d{2})")
+
+
+def minutos_de_hora(texto: str) -> Decimal:
+    """'13:30' → 810. Rechaza lo que no sea HH:MM de 00:00 a 23:59."""
+    m = _HHMM.fullmatch(texto.strip())
+    if m is None or int(m[1]) > 23 or int(m[2]) > 59:
+        raise ErrorParametro(f"hora no válida: {texto!r} (escríbela HH:MM)")
+    return Decimal(int(m[1]) * 60 + int(m[2]))
+
+
+def hora_de_minutos(minutos: Decimal) -> str:
+    n = int(minutos)
+    return f"{n // 60:02d}:{n % 60:02d}"
+
+
+def valor_de_texto(texto: str, unidad: str | None = None) -> Decimal:
+    """Valor de un parámetro escrito por el usuario: HH:MM si la unidad es «hora»; si no, un número."""
+    if unidad == UNIDAD_HORA:
+        return minutos_de_hora(texto)
+    try:
+        return Decimal(texto.strip().replace(",", "."))
+    except InvalidOperation as e:
+        raise ErrorParametro(f"valor no numérico: {texto!r}") from e
+
+
+def unidad_bateria(conn: psycopg.Connection, clave: str) -> str | None:
+    fila = conn.execute("SELECT unidad FROM bateria_parametro_clave WHERE clave = %s", (clave,)).fetchone()
+    return fila[0] if fila else None
+
+
+def texto_de_valor(valor: Decimal, unidad: str) -> str:
+    """Valor con su unidad para el CLI: las horas, HH:MM."""
+    return hora_de_minutos(valor) if unidad == UNIDAD_HORA else f"{valor} {unidad}"
 
 
 @dataclass(frozen=True)

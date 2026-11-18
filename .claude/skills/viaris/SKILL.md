@@ -38,7 +38,7 @@ curl -s "$V/modules/scheduler/elements?level=cfg" \
   | jq '.[0].data.cfg.tasks[] | {id, active, type, weekday: .initTime.weekday,
         day: .initTime.day, month: .initTime.month,
         franja: .initTime.timeList[0]}'
-curl -s "$V/modules/modulator/historic" | jq -r .body | tail -5
+curl -s "$V/modules/modulator/historic" | jq -r .body | sort -t, -k7,7n | tail -5  # desordenado: por inicio
 ```
 
 ## Procedimiento para probar una escritura (etapa 3)

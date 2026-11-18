@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from energia_monitor.formulario import formato as f
+from energia_monitor.parametros import UNIDAD_HORA, hora_de_minutos, valor_de_texto
 from energia_monitor.formulario.datos import Parametro, Parametros
 from energia_monitor.formulario.html import Html, h, unir
 
@@ -29,7 +30,9 @@ def _segundos(s: Decimal) -> str:
 
 
 def valor(clave: str, unidad: str, v: Decimal) -> str:
-    """Valor como se muestra (7.5): segundos en minutos u horas, sí/no, P75..."""
+    """Valor como se muestra (7.5): segundos en minutos u horas, sí/no, P75, hora del día..."""
+    if unidad == UNIDAD_HORA:
+        return hora_de_minutos(v)
     if unidad == "s":
         return _segundos(v)
     if unidad == "sí/no":
@@ -50,6 +53,8 @@ def rango(p: Parametro) -> str:
         return f"{'0' if p.minimo == 0 else _segundos(p.minimo)}–{_segundos(p.maximo)}"
     if p.unidad == "sí/no":
         return "sí / no"
+    if p.unidad == UNIDAD_HORA:
+        return f"{hora_de_minutos(p.minimo)}–{hora_de_minutos(p.maximo)}"
     if p.unidad in ("factor", "fracción"):
         return f"{_num(p.minimo, 2)}–{_num(p.maximo, 2)}"
     return f"{_num(p.minimo)}–{_num(p.maximo)}"
@@ -57,8 +62,14 @@ def rango(p: Parametro) -> str:
 
 def unidad_entrada(p: Parametro) -> str:
     """Unidad en la que se escribe el valor nuevo en la página."""
-    return {"s": "min", "sí/no": "1 = sí, 0 = no", "fracción": "fracción", "factor": "factor", "n": "número"}.get(
+    return {"s": "min", "sí/no": "1 = sí, 0 = no", "fracción": "fracción", "factor": "factor", "n": "número",
+            UNIDAD_HORA: "HH:MM"}.get(
         p.unidad, p.unidad)
+
+
+def leer_valor(p: Parametro, texto: str) -> Decimal:
+    """Valor escrito en la página, en la unidad guardada. ErrorParametro si no se entiende."""
+    return a_unidad_guardada(p, valor_de_texto(texto, p.unidad))
 
 
 def a_unidad_guardada(p: Parametro, v: Decimal) -> Decimal:
@@ -84,13 +95,17 @@ def _tabla(d: Parametros) -> Html:
         v = valor(p.clave, p.unidad, p.valor)
         origen = ORIGENES.get(p.origen, p.origen)
         desde = f"{p.desde:%d/%m/%Y}"
+        # Las claves no editables (id_tarea_guardiana) se muestran sin enlace: solo se cambian por CLI.
+        cambiar = (h('<a href="/parametros?clave={}#cambiar" class="lk">Cambiar</a>', p.clave) if p.editable
+                   else h('<span class="k m">solo CLI</span>'))
         filas.append(h('<tr><td><p class="nombre">{}</p><p class="k m">{}</p></td><td class="r m">{}</td>'
                        '<td class="r m">{}</td><td><span class="tag horario">{}</span></td><td class="m">{}</td>'
-                       '<td class="r"><a href="/parametros?clave={}#cambiar" class="lk">Cambiar</a></td></tr>',
-                       p.nombre, p.clave, v, rango(p), origen, desde, p.clave))
-        items.append(h('<a class="it-parametro" href="/parametros?clave={}#cambiar"><div><p class="nombre">{}</p>'
-                       '<p class="k m">{}</p></div><div class="r"><p class="m">{}</p><p class="k m">{} · {}</p></div></a>',
-                       p.clave, p.nombre, p.clave, v, origen, desde))
+                       '<td class="r">{}</td></tr>',
+                       p.nombre, p.clave, v, rango(p), origen, desde, cambiar))
+        contenido = h('<div><p class="nombre">{}</p><p class="k m">{}</p></div><div class="r"><p class="m">{}</p>'
+                      '<p class="k m">{} · {}</p></div>', p.nombre, p.clave, v, origen, desde)
+        items.append(h('<a class="it-parametro" href="/parametros?clave={}#cambiar">{}</a>', p.clave, contenido)
+                     if p.editable else h('<div class="it-parametro">{}</div>', contenido))
     return h('<section class="pn solo-escritorio"><div class="ph"><h2 class="pt">Parámetros vigentes</h2><span class="k m">'
              'cada cambio es un registro nuevo con fecha de inicio</span></div><div class="tabla-desplazable"><table>'
              '<thead><tr><th>Parámetro</th><th class="r">Valor</th><th class="r">Rango</th><th>Origen</th><th>Desde</th>'
@@ -134,9 +149,10 @@ def _calibracion(d: Parametros) -> Html:
 
 
 def _formulario(d: Parametros, form: FormParametro) -> Html:
-    elegido = next((p for p in d.vigentes if p.clave == form.clave), d.vigentes[0])
+    editables = [p for p in d.vigentes if p.editable]
+    elegido = next((p for p in editables if p.clave == form.clave), editables[0])
     opciones = unir(h('<option value="{}"{}>{} · {}</option>', p.clave,
-                      Html(" selected") if p.clave == elegido.clave else Html(""), p.clave, p.nombre) for p in d.vigentes)
+                      Html(" selected") if p.clave == elegido.clave else Html(""), p.clave, p.nombre) for p in editables)
 
     def error(campo: str) -> tuple[Html, Html]:
         if campo in form.errores:
@@ -147,21 +163,26 @@ def _formulario(d: Parametros, form: FormParametro) -> Html:
     va_a, va_e = error("valor")
     de_a, de_e = error("desde")
     cl_a, cl_e = error("clave")
-    valor_actual = form.valor or _num(de_unidad_guardada(elegido, elegido.valor))
+    hora = elegido.unidad == UNIDAD_HORA
+    valor_actual = form.valor or (hora_de_minutos(elegido.valor) if hora
+                                  else _num(de_unidad_guardada(elegido, elegido.valor)))
+    tipo = (h('type="time" step="60" min="{}" max="{}"', hora_de_minutos(elegido.minimo),
+              hora_de_minutos(elegido.maximo)) if hora else Html('type="text" inputmode="decimal"'))
     hoy = f"{f.local(d.ahora):%Y-%m-%d}"
     return h(
         '<form class="pn orden-1" id="cambiar" action="/parametros" method="post"><div class="ph"><h2 class="pt">Cambiar '
         'un valor</h2></div><div class="relleno"><div class="campo"><label for="p-clave" class="k">Parámetro</label>'
         '<select id="p-clave" name="clave" class="inp"{}>{}</select>{}</div><div class="dos"><div class="campo">'
-        '<label for="p-valor" class="k">Valor nuevo ({})</label><input id="p-valor" name="valor" class="inp" type="text" '
-        'inputmode="decimal" required value="{}"{}>{}</div><div class="campo"><label for="p-desde" class="k">Desde</label>'
+        '<label for="p-valor" class="k">Valor nuevo ({})</label><input id="p-valor" name="valor" class="inp" {} '
+        'required value="{}"{}>{}</div><div class="campo"><label for="p-desde" class="k">Desde</label>'
         '<input id="p-desde" name="desde" class="inp" type="date" required min="{}" value="{}"{}>{}</div></div>'
         '<p class="k m">rango admitido {} · fuera de rango → no se guarda</p><p class="k texto">{} Si eliges otro '
-        'parámetro en la lista, el valor va en su unidad (minutos para los que se guardan en segundos).</p>'
+        'parámetro en la lista, el valor va en su unidad (minutos para los que se guardan en segundos; HH:MM para las '
+        'horas).</p>'
         '<div class="campo"><label for="p-nota" class="k">Nota</label><input id="p-nota" name="nota" class="inp" '
         'type="text" maxlength="80" placeholder="Motivo del cambio" value="{}"></div><button type="submit" class="btn">'
         'Registrar valor</button></div></form>',
-        cl_a, opciones, cl_e, unidad_entrada(elegido), valor_actual, va_a, va_e, hoy, form.desde or hoy, de_a, de_e,
+        cl_a, opciones, cl_e, unidad_entrada(elegido), tipo, valor_actual, va_a, va_e, hoy, form.desde or hoy, de_a, de_e,
         rango(elegido), elegido.descripcion, form.nota)
 
 

@@ -41,7 +41,7 @@ CONECTADO = range(3, 9)
 LIBRE = (1, 2)
 ORDEN = {"sesion": 1, "carga_completa": 2, "trayecto": 3, "carga_externa": 4, "lectura": 5}
 
-# Valores iniciales de la migración 0014, vigentes desde el 1/1/2025.
+# Valores iniciales de las migraciones 0014, 0016 y 0020, vigentes desde el 1/1/2025.
 PARAMETROS_INICIALES: dict[str, Decimal] = {
     "capacidad_util_kwh": Decimal("91.3"),
     "reserva_pct": Decimal(25),
@@ -58,6 +58,26 @@ PARAMETROS_INICIALES: dict[str, Decimal] = {
     "aviso_sin_lectura_dias": Decimal(7),
     "hueco_muestreo_aviso_s": Decimal(1800),
     "umbral_carga_externa_kwh": Decimal(5),  # 0016
+    # 0020: planificador de carga (etapa 3, E3.9).
+    "carga_oportunista": Decimal(1),
+    "umbral_oportunista_pct": Decimal(60),
+    "nivel_oportunista_pct": Decimal(100),
+    "margen_carga_pct": Decimal(10),
+    "margen_salida_min": Decimal(30),
+    "potencia_carga_inicial_kw": Decimal("4.5"),
+    "ventana_disponibilidad_dias": Decimal(28),
+    "umbral_disponibilidad_pct": Decimal(80),
+    "historial_min_disponibilidad_dias": Decimal(21),
+    "horizonte_provisional_h": Decimal(48),
+    "franja_min_min": Decimal(30),
+    "max_tareas_sistema": Decimal(7),
+    "id_tarea_guardiana": Decimal(9),
+    "aviso_planificador_min": Decimal(60),
+    "ventana_precio_esperado_dias": Decimal(28),
+    "ventana_umbral_dias": Decimal(7),
+    "ventana_potencia_dias": Decimal(28),
+    "horizonte_plan_h": Decimal(72),
+    "hora_publicacion_precios": Decimal(810),  # minutos desde las 00:00 (13:30)
 }
 
 

@@ -470,12 +470,6 @@ def horario(conn: psycopg.Connection, ahora: datetime) -> HorarioDatos:
 
 # --- Parámetros (7.5) y Ayuda (7.6) ---------------------------------------------------------------
 
-ORDEN_PARAMETROS = ("capacidad_util_kwh", "reserva_pct", "tope_pct", "factor_bateria", "percentil_planificacion",
-                    "ventana_consumo_dias", "desconexion_min_s", "consumo_inicial_trayecto_kwh", "consumo_kwh_100km",
-                    "energia_min_calibracion_kwh", "observaciones_calibracion", "detectar_carga_completa",
-                    "hueco_muestreo_aviso_s", "aviso_sin_lectura_dias", "umbral_carga_externa_kwh")
-
-
 @dataclass(frozen=True)
 class Parametro:
     clave: str
@@ -489,6 +483,8 @@ class Parametro:
     origen: str
     desde: date
     id: int
+    grupo: int  # bateria_parametro_grupo (0020); el orden de la lista sale de grupo y orden
+    editable: bool  # false: se muestra pero no se cambia desde la página (id_tarea_guardiana)
 
 
 @dataclass(frozen=True)
@@ -525,10 +521,8 @@ def parametros(conn: psycopg.Connection, ahora: datetime) -> Parametros:
     hoy = ahora.astimezone(MADRID).date()
     vigentes = [Parametro(*f) for f in conn.execute(
         "SELECT k.clave, k.nombre, k.unidad, k.minimo, k.maximo, k.descripcion, k.efecto, p.valor, p.origen,"
-        " lower(p.vigencia), p.id FROM bateria_parametro_clave k JOIN bateria_parametro p"
-        " ON p.clave = k.clave AND p.vigencia @> %s::date", (hoy,))]
-    orden = {c: i for i, c in enumerate(ORDEN_PARAMETROS)}
-    vigentes.sort(key=lambda p: orden.get(p.clave, len(orden)))
+        " lower(p.vigencia), p.id, k.grupo, k.editable FROM bateria_parametro_clave k JOIN bateria_parametro p"
+        " ON p.clave = k.clave AND p.vigencia @> %s::date ORDER BY k.grupo, k.orden", (hoy,))]
     cambios = [Cambio(*f) for f in conn.execute(
         "SELECT p.id, p.clave, lower(p.vigencia), p.valor, a.valor, coalesce(p.nota, p.fuente)"
         " FROM bateria_parametro p LEFT JOIN LATERAL (SELECT q.valor FROM bateria_parametro q"

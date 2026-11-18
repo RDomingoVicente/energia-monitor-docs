@@ -452,6 +452,60 @@ def test_parametros_vigentes_en_unidades_de_pantalla(conn: psycopg.Connection, n
         assert fila in t, fila
 
 
+def test_parametros_en_el_orden_de_los_grupos(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
+    """0020: el orden sale de grupo y orden (E3.9), sin lista fija en el código; claves del planificador."""
+    t = texto(app_rw(nombre_bd, MEDIODIA).manejar(Peticion("GET", "/parametros", CAB)).cuerpo)
+    tabla = t[t.index("Parámetros vigentes"):]
+    orden = [c for (c,) in conn.execute("SELECT clave FROM bateria_parametro_clave ORDER BY grupo, orden")]
+    posiciones = [tabla.index(f" {c} ") for c in orden]
+    assert posiciones == sorted(posiciones)
+    for fila in ("Publicación de precios hora_publicacion_precios 13:30 12:00–18:00",
+                 "Carga oportunista carga_oportunista sí sí / no",
+                 "Margen antes de salir margen_salida_min 30 min 0–120",
+                 "Potencia de carga inicial potencia_carga_inicial_kw 4,5 kW 1,4–11",
+                 "Tarea guardiana id_tarea_guardiana 9 1–10 usuario 01/01/2025 solo CLI"):
+        assert fila in tabla, fila
+
+
+def test_tarea_guardiana_no_se_cambia_desde_la_pagina(conn: psycopg.Connection, nombre_bd: str,
+                                                       limpio: None) -> None:
+    app = app_rw(nombre_bd, MEDIODIA)
+    html = app.manejar(Peticion("GET", "/parametros?clave=id_tarea_guardiana", CAB)).cuerpo.decode()
+    assert '<option value="id_tarea_guardiana"' not in html
+    assert 'href="/parametros?clave=id_tarea_guardiana' not in html
+    antes = conn.execute("SELECT count(*) FROM bateria_parametro").fetchone()
+    estado, _, html = post(app, "/parametros", "clave=id_tarea_guardiana&valor=8&desde=2026-11-20")
+    assert estado == 422 and "Elige un parámetro de la lista." in html
+    assert conn.execute("SELECT count(*) FROM bateria_parametro").fetchone() == antes
+
+
+def test_registrar_hora_de_publicacion(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
+    """Unidad «hora» (0020): se guarda en minutos (810) y se ve y se escribe HH:MM."""
+    app = app_rw(nombre_bd, MEDIODIA)
+    html = app.manejar(Peticion("GET", "/parametros?clave=hora_publicacion_precios", CAB)).cuerpo.decode()
+    assert "Valor nuevo (HH:MM)" in html
+    assert 'type="time" step="60" min="12:00" max="18:00" required value="13:30"' in html
+    estado, destino, _ = post(app, "/parametros", "clave=hora_publicacion_precios&valor=14%3A15&desde=2026-11-20")
+    assert estado == 303
+    assert conn.execute("SELECT valor FROM bateria_parametro WHERE clave = 'hora_publicacion_precios'"
+                        " AND lower(vigencia) = '2026-11-20'").fetchone() == (855,)
+    t = texto(app.manejar(Peticion("GET", destino, CAB)).cuerpo)
+    assert "hora_publicacion_precios = 14:15 desde el 20/11/2026." in t
+    assert "20/11/2026 hora_publicacion_precios 13:30 → 14:15" in t
+    limpiar_parametros(conn)
+
+
+@pytest.mark.parametrize(("valor", "mensaje"), [("14,25", "Indica la hora (HH:MM)."), ("25:00", "Indica la hora (HH:MM)."),
+                                                ("19%3A00", "fuera de rango: 1140 (admitido de 720 a 1080)")])
+def test_hora_de_publicacion_no_valida(conn: psycopg.Connection, nombre_bd: str, limpio: None, valor: str,
+                                       mensaje: str) -> None:
+    antes = conn.execute("SELECT count(*) FROM bateria_parametro").fetchone()
+    estado, _, html = post(app_rw(nombre_bd, MEDIODIA), "/parametros",
+                           f"clave=hora_publicacion_precios&valor={valor}&desde=2026-11-20")
+    assert estado == 422 and mensaje in html
+    assert conn.execute("SELECT count(*) FROM bateria_parametro").fetchone() == antes
+
+
 def test_registrar_parametro_desde_la_pagina(conn: psycopg.Connection, nombre_bd: str, limpio: None) -> None:
     app = app_rw(nombre_bd, MEDIODIA)
     html = app.manejar(Peticion("GET", "/parametros?clave=desconexion_min_s", CAB)).cuerpo.decode()

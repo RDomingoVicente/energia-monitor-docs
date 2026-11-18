@@ -477,7 +477,8 @@ OBJETOS_BATERIA = ["bateria_parametro_clave", "bateria_parametro", "bateria_lect
                    "bateria_excepcion", "bateria_sesion", "bateria_trayecto", "bateria_nivel", "bateria_intervalo",
                    "v_bateria_consumo_dia", "v_bateria_calibracion", "v_bateria_estado", "v_bateria_salida",
                    "v_bateria_evento", "bateria_carga_externa", "bateria_recalculo", "v_bateria_lectura_historial",
-                   "v_bateria_excepcion_pasada", "v_bateria_evento_reciente"]
+                   "v_bateria_excepcion_pasada", "v_bateria_evento_reciente",
+                   "bateria_parametro_grupo"]  # 0020
 OBJETOS_0016 = ["aviso_historial", "v_aviso", "v_coste_carga_externa"]
 
 
@@ -666,7 +667,7 @@ def test_claves_con_textos_y_rango(conn: psycopg.Connection, limpio: None) -> No
     filas = conn.execute(
         "SELECT k.clave, k.nombre, k.descripcion, k.efecto, k.minimo, k.maximo, p.valor"
         " FROM bateria_parametro_clave k JOIN bateria_parametro p USING (clave) ORDER BY k.clave").fetchall()
-    assert len(filas) == 15
+    assert len(filas) == 34  # 15 de la etapa 2 y 19 del planificador (0020)
     for clave, nombre, descripcion, efecto, minimo, maximo, valor in filas:
         assert nombre and descripcion and efecto, clave
         assert minimo <= valor <= maximo, clave

@@ -1,6 +1,6 @@
 # Fase 2: medición y carga automática del coche
 
-Estado a 14/11/2026. Especificación funcional de la fase 2. La API del
+Estado a 18/11/2026. Especificación funcional de la fase 2. La API del
 cargador está en [viaris-api.md](viaris-api.md); el contexto del suministro y
 de la fase 1, en [contexto.md](contexto.md).
 
@@ -16,8 +16,8 @@ La fase se entrega en tres etapas independientes y en este orden:
 2. **Batería y previsión**: nivel de batería estimado, horarios, excepciones
    y energía necesaria para la próxima salida, con una página para
    introducirlos.
-3. **Planificador**: cálculo del plan, escritura de franjas en el cargador y
-   modos "cargar ahora" y "automatización en pausa".
+3. **Planificador**: cálculo del plan, escritura de franjas en el cargador,
+   modos sombra, activo y pausa, y la acción "cargar ahora".
 
 Cada etapa se publica con su tag y queda en producción antes de empezar la
 siguiente.
@@ -53,8 +53,8 @@ siguiente.
 - El perfil semanal guarda solo horarios de salida. El consumo previsto lo
   calcula el sistema a partir del uso reciente; los días especiales se
   declaran como excepción.
-- Los umbrales de precio son percentiles de una ventana móvil, no valores
-  fijos en €/kWh.
+- El umbral de precio barato es relativo (un porcentaje de la media del
+  precio final de los últimos 7 días), no un valor fijo en €/kWh (E3.4).
 - Todo parámetro vive en tabla con vigencia, como en la fase 1.
 
 ## Etapa 1: medición
@@ -597,58 +597,443 @@ regulado, estimado, usuario o ficha_tecnica. Los booleanos se guardan como
 - El estado del conector cuando el coche corta la carga por estar lleno (4 u
   8).
 
-## Etapa 3: planificador
+## Etapa 3: planificador de carga
 
-Se detalla al cerrar la etapa 2 y tras las pruebas de escritura pendientes.
+Etapa actual, especificada el 18/11/2026 (antes docs/fase2-etapa3.md, revisada
+y aprobada), con las pruebas del cargador del 17 y el 18/11/2026. Sustituye al
+esbozo anterior de esta sección (umbrales por percentiles, franja de respaldo
+recurrente y escritura activada por variable de entorno). Las aclaraciones del
+plan del paso 3a (18/11/2026) están incorporadas en los requisitos y en
+«Decisiones del paso 3a». Tarea y orden de entrega:
+[tareas/etapa-3-planificador.md](tareas/etapa-3-planificador.md).
 
-### Modos
+Entrega (E3.11):
 
-"Cargar ahora" (sin restricción de precio, hasta un nivel o una hora, y vuelta
-automática al modo normal; queda registrado con su coste) y "automatización
-en pausa" (el sistema no escribe en el cargador). Pasan aquí desde la etapa 2
-porque solo tienen sentido cuando el sistema escribe franjas.
+| Paso | Contenido | Escribe en el cargador |
+|---|---|---|
+| 3.0 | Pruebas de E3.1 (hechas el 17 y 18/11/2026) | Sí, a mano, una a una |
+| 3a | Modelo, disponibilidad, algoritmo, modo sombra, CLI (`planificador plan`, `planificador simular` sobre un día pasado), tests | No |
+| 3b | Pantalla Plan de carga y panel de Inicio (sombra: solo lectura) | No |
+| 3c | Escritura y reconciliación, franjas manuales, Detener, modo activo, auditoría | Sí |
+| 3d | Aviso por correo, avisos nuevos, Grafana | — |
 
-### Cálculo
+Entre 3b y 3c, al menos una semana en sombra revisando el plan y el ahorro.
 
-1. Tramos de 15 min con precio publicado en los que se prevé el coche en casa.
-2. Energía obligatoria por cada salida prevista: la necesaria para salir con
-   reserva + consumo previsto (o el nivel de la excepción).
-3. Selección de los tramos más baratos antes de cada salida hasta cubrirla,
-   con un margen del 10 % y la potencia de planificación (parámetro, 4,0 kW).
-4. Energía oportunista: tramos por debajo del umbral de precio, hasta el nivel
-   que corresponda.
-5. Agrupación en bloques contiguos (mínimo 30 min, máximo 6 bloques).
-6. Escritura de las franjas y borrado de las caducadas.
-7. Recálculo periódico con la energía realmente entregada.
+1. Paso 3.0, pruebas del cargador: hecho (17 y 18/11/2026; E3.1 y
+   viaris-api.md).
+2. Paso 3a, en curso (plan aprobado el 18/11/2026). Primera entrega:
+   migración 0020 (parámetros agrupados y claves nuevas, `planificador_modo`,
+   `planificador_config`, tablas del plan con los choques con tareas ajenas,
+   solicitud y ciclo, entradas en
+   SQL y vistas `v_plan_franja`, `v_plan_vigente`, `v_plan_efectivo` y
+   `v_plan_ahorro`), referencia en Python del ahorro
+   (`plan_carga/ahorro.py`) y Parámetros ordenada por grupo, con
+   `id_tarea_guardiana` no editable y las horas en HH:MM (guardadas en
+   minutos). La 0020 no se aplica en el NAS hasta cerrar 3a (v0.6.0);
+   mientras, se puede corregir. Verificado con tests (ahorro SQL frente
+   a Python en la noche del cambio de hora y en 12 casos aleatorios).
+   Pendiente: algoritmo, servicio, ciclo en el muestreo, CLI y solicitudes de
+   recálculo.
 
-### Umbrales
+### Objetivo
 
-Referencia: precio final de los últimos 14 días en las horas en que el coche
-suele estar en casa.
+Programar automáticamente las franjas de carga del Viaris para que el coche
+salga con el objetivo cubierto pagando lo mínimo, y cargar de más cuando la
+energía está barata.
 
-| Precio del tramo | Nivel hasta el que se carga |
-|------------------|-----------------------------|
-| Por debajo del percentil 30 | Tope (100 %) |
-| Entre los percentiles 30 y 70 | Intermedio (70 %) |
-| Por encima del percentil 70 | Solo lo obligatorio |
+### Principios
 
-Todos los valores son parámetros con vigencia.
+- Determinista y explicable: cada franja tiene un motivo visible.
+- El cargador sigue siendo la única protección eléctrica (modulador y 20 A).
+- Si el sistema falla, el riesgo es no cargar, nunca cargar caro. El
+  cargador solo bloquea fuera de las franjas mientras haya **al menos una
+  tarea activa**; sin ninguna, carga libremente (E3.1). Por eso existe
+  siempre una tarea guardiana activa (E3.6).
+- Tú mandas: cualquier franja se puede tocar desde el formulario y el
+  planificador lo respeta.
+- Puesta en marcha gradual: modo sombra antes de escribir en el cargador.
 
-### Puesta en marcha
+### Requisitos
 
-Primero en **modo sombra**: el plan se calcula, se guarda y se muestra en el
-dashboard junto a lo que realmente ocurrió, sin escribir en el cargador. La
-escritura se activa después con una variable de entorno.
+**E3.1 Hechos verificados del cargador (15–18/11/2026).** Detalle y
+procedimiento en viaris-api.md.
 
-Métrica de resultado: ahorro frente a cargar al enchufar a potencia máxima.
+| Hecho | Fuente |
+|---|---|
+| Con al menos una tarea activa, el coche enchufado no carga fuera de las tareas (`defaultState: 1`) | 15/11 y 18/11 |
+| **Sin ninguna tarea activa, el cargador carga libremente** en cuanto el coche está enchufado | 17/11 20:16 (sesión de 53 s al desactivar todas) y prueba del 18/11 08:47 (estado 6, 4040 W) |
+| Una única tarea activa con fecha de otro día (31/12 00:00, 1 min) basta para bloquear la carga; al reactivarla durante una carga libre, la corta | prueba del 18/11 08:45–08:48 |
+| La tarea se cumple al segundo: inicio 02:00:01, fin 06:00:01 | sesión del 16/11 |
+| Desactivar una tarea en curso (`active: 0`) corta la carga | prueba con la app de Orbis, 17/11; es la misma operación que hará el planificador |
+| Cuando el coche se llena deja de entrar energía y la franja sigue activa; el coche avisa de fin de carga | usuario |
+| Potencia real ≈ 4,5 kW constante (20 A en el cargador y potencia contratada 4,6 kW) | sesiones del 15 y 16/11 |
+| El modulador prioriza la vivienda y corta la carga si se supera la potencia contratada | configuración del usuario |
+| Estado 5 durante la carga: pausa (probablemente pedida por el coche); la franja sigue activa | 16/11 05:06:58 |
+| `localtime` de `/modules/evsm/elements` es el último cambio de evento, no la hora de conexión | 15/11 |
+| Tareas: `hourMin` y `duration` en minutos; `weekday` máscara (bit 0 = domingo, 0 = todos); máscaras de día y mes sin año; máximo 10 tareas | etapa 1 |
+| La app de Orbis solo crea tareas semanales y parte en la medianoche las franjas que la cruzan (23:00 + 59 min y 00:00 + 480 min, con un minuto sin carga entre ambas) | 17/11 |
+| La API acepta tareas con fecha (`day` y `month`, `weekday` 0) y calcula bien su ocurrencia; con `hourMin` 1380 y `duration` 540 el fin calculado es las 08:00 del día siguiente | 17/11 (`_initLocaltime`, `_endLocaltime`) |
+| La app muestra una tarea con fecha como «todos los días»; si se guarda desde la app, probablemente pierde la fecha | 17/11 |
+| El cargador **no impide solapes**: acepta y activa dos tareas activas que se pisan, sin error (HTTP 200) | 17/11, tarea 9 sobre las tareas 5 y 6 |
+| Una tarea con fecha se ejecuta ese día | 17/11, tarea 9 con fecha 17/11 desde las 23:00, sin tareas semanales activas |
+| **Una tarea no cruza la medianoche**: a las 00:00 deja de cargar aunque `_endLocaltime` marque las 08:00 (probablemente porque la fecha o el día de la semana se comprueban en cada instante) | noche del 17 al 18/11 (sesión 23:00:00–00:00:01, inicio y fin `schedman`, 4,6 kWh) |
 
-### Pendiente de verificar con el coche conectado
+Consecuencia: toda franja que cruce la medianoche se escribe como dos tareas,
+una hasta las 00:00 y otra desde las 00:00, igual que hace la app.
 
-1. Que una franja activa con fecha concreta inicia y detiene la carga.
-2. Qué hace el cargador sin ninguna franja activa (`defaultState`).
-3. Cómo reacciona a una franja creada, modificada o borrada durante una carga.
-4. Franja de respaldo: una recurrente siempre activa garantiza carga si el NAS
-   falla, pero impide saltarse días caros. Decisión abierta.
+**E3.2 Entradas del planificador.**
+
+| Entrada | Origen |
+|---|---|
+| Nivel actual y confianza | `bateria_estado(instante)` (en `now()` es `v_bateria_estado`) |
+| Salidas, consumo previsto y objetivo de cada una | `bateria_salidas(desde, días)` (horario + excepciones); la energía necesaria la calcula el planificador (E3.4) |
+| Precio final por cuarto de hora | `mv_precio_final`, con el contrato y la fuente de `planificador_config` (una fila: `vivienda`, `omie`; no se edita desde el formulario) |
+| Eficiencia de carga | `factor_bateria` |
+| Potencia de carga | mediana de la potencia medida (`evse_w` de `cargador_muestra`) con carga en los últimos `ventana_potencia_dias`, por hora local (0–23); si no hay datos, `potencia_carga_inicial_kw` |
+| Disponibilidad del coche | E3.3 |
+
+**E3.3 Disponibilidad aprendida.** No hay hora de vuelta manual. La
+disponibilidad se aprende de las conexiones y desconexiones registradas en
+`cargador_estado`.
+
+- Para cada día de la semana y cuarto de hora: probabilidad de que el coche
+  esté enchufado, con los últimos `ventana_disponibilidad_dias`.
+- **Ventana segura:** desde ahora, si el coche está enchufado, hasta la próxima
+  salida.
+- **Ventana probable:** cuartos de hora futuros con probabilidad ≥
+  `umbral_disponibilidad_pct`. Para la energía necesaria de la próxima salida
+  solo se usan si la ventana segura no basta o no existe, y siempre que
+  terminen antes de la salida − `margen_salida_min`; para las salidas
+  posteriores son la única fuente. Los niveles 2 y 3 también pueden usarlas,
+  prefiriendo la segura en caso de empate. Si al llegar el coche no está, se
+  replanifica al enchufar.
+- Con menos de `historial_min_disponibilidad_dias` de historial, solo se usa la
+  ventana segura (**modo prudente**). En modo prudente el nivel 1 cubre solo
+  la próxima salida; las siguientes se planifican al volver a enchufar.
+- Un cuarto de hora cuenta como observado si tiene alguna muestra del
+  cargador, y como «enchufado» si todas sus muestras con estado tienen un
+  estado no libre (ni 1 ni 2). La probabilidad es enchufados ÷ observados,
+  por día de la semana y cuarto de hora local; los cuartos sin muestras (huecos
+  del muestreo) no cuentan. El historial son los días locales con alguna
+  muestra dentro de la ventana.
+
+**E3.4 Algoritmo.** Unidad de tiempo: el cuarto de hora del mercado.
+Horizonte: hasta la última salida conocida o `horizonte_plan_h` (72 h), lo que
+sea menor.
+
+**Precio de cada cuarto de hora:** el publicado si existe; si no, el esperado
+(media del precio final del mismo día de la semana y hora en los últimos
+`ventana_precio_esperado_dias`). Un cuarto de hora con precio esperado es
+**provisional**. Los precios del día D+1 cuentan como publicados desde la
+`hora_publicacion_precios` (13:30) del día D; lo usan el planificador,
+`planificador simular` y el aviso de precios sin publicar (3d).
+
+**Umbral barato:** `umbral_oportunista_pct` × media del precio final de los
+últimos `ventana_umbral_dias` días completos.
+
+**Energía del cargador:** energía a batería ÷ `factor_bateria`.
+
+**Tres niveles, en este orden:**
+
+| Nivel | Energía | Horas que puede usar |
+|---|---|---|
+| 1. Necesaria | La que hace falta para cubrir cada salida (acumulada: antes de cada salida, la suya y la de las siguientes sin otra ventana) | Las más baratas disponibles antes de la salida − `margen_salida_min`. Si las de por debajo del umbral no bastan, se usan las siguientes más baratas, sin límite de precio |
+| 2. Margen | `margen_carga_pct` sobre la necesaria | Solo por debajo del umbral y con precio publicado. Si no hay, no se añade |
+| 3. Oportunista | Hasta `nivel_oportunista_pct` (si `carga_oportunista` = sí) | Solo por debajo del umbral y con precio publicado |
+
+Nunca se supera `tope_pct` en ningún punto de la trayectoria del nivel (el
+consumo previsto de cada salida se resta en su instante). Entre igualdad de
+precio se prefieren la madrugada (00:00–08:00) y los cuartos ya en ventana
+segura (menos riesgo de corte por la casa o de ausencia). Los cuartos se
+asignan enteros (se redondea hacia arriba, sin pasar del tope).
+
+Consolidación en franjas:
+
+- Cuartos de hora contiguos → una franja.
+- Franjas de menos de `franja_min_min` se descartan o se unen a la vecina:
+  gana la opción de menor coste total.
+- Si salen más de `max_tareas_sistema` tareas, se rellenan los huecos más
+  baratos de cerrar hasta caber. Una franja que cruza la medianoche cuenta
+  como dos tareas.
+- Una franja que cruce la medianoche se escribe como dos tareas (E3.1); en el
+  formulario y en el plan se muestra como una sola franja.
+
+**Recálculo:** cada 15 minutos y en cada evento (conexión, desconexión,
+lectura, excepción, horario, parámetro, precios nuevos y cambio manual).
+
+Reglas fijas:
+
+- El planificador **nunca toca una franja en curso**. Que no entre energía
+  (modulador, estado 5, coche lleno) no es un fallo: si al terminar ha entrado
+  menos de lo previsto, se añade energía en franjas futuras.
+- Las franjas manuales y los bloqueos (E3.5) se respetan siempre.
+- **Sin solapes.** El cargador no los impide (E3.1), así que la regla es
+  nuestra: las franjas automáticas solo ocupan los huecos que dejan las demás
+  tareas activas (manuales del formulario y tareas de la app de Orbis), y la
+  energía de esas tareas se descuenta de la necesaria. Si aparece en el
+  cargador una tarea ajena que pisa una franja automática futura, el
+  planificador recorta o mueve la suya; si la automática está en curso, no la
+  toca y da un aviso.
+- La guardiana (1 minuto el 31/12) no cuenta como solape.
+- **En sombra** se planifica como si en el cargador solo estuviera la
+  guardiana (como en activo, con las tareas de la app desactivadas), y se
+  anota con qué tareas ajenas chocaría cada franja (`plan_franja.choca_con`;
+  se muestra en el plan).
+  Leer el programador para saberlo llega en 3c, con el `GET` en la lista
+  cerrada; en 3a y 3b no hay choques anotados.
+
+Modos (`modo_planificador`, tabla `planificador_modo` con historial: desde,
+modo, origen y nota; en 3a, fijo en sombra):
+
+- **sombra:** calcula y guarda el plan, no escribe en el cargador.
+- **activo:** escribe y reconcilia.
+- **pausa:** desactiva sus propias tareas futuras y deja de escribir; no toca
+  las tareas de la app, la franja en curso ni la guardiana.
+- **Cargar ahora** (acción, no modo): crea una franja manual desde ahora con
+  la duración necesaria para llegar al objetivo de la próxima salida o, si ya
+  está cubierto, al `nivel_oportunista_pct`, sin mirar el precio.
+
+**E3.5 Franjas: estados y control manual.** Cada franja tiene dos estados
+independientes:
+
+| Estado en el cargador | Significado |
+|---|---|
+| pendiente | aún no escrita |
+| confirmada | escrita y comprobada leyendo el programador |
+| error | la escritura o la comprobación falló (con el motivo) |
+
+| Estado de ejecución | Significado |
+|---|---|
+| programada | todavía no ha empezado |
+| cargando | franja activa, estado 6 y potencia > 0 |
+| en pausa | franja activa sin energía (modulador, estado 5 o coche lleno; el motivo si se puede distinguir) |
+| terminada | acabó; con energía y coste reales |
+| no ejecutada | acabó sin energía (normalmente, coche no enchufado) |
+| cancelada | detenida o eliminada por el usuario |
+
+Control desde el formulario:
+
+- **Franjas futuras:** añadir, modificar horas y eliminar, automáticas o
+  manuales.
+- **Franja en curso:** solo **Detener**. Desactiva la tarea (`active: 0`) y la
+  franja pasa a cancelada; después se puede eliminar. No se puede cambiar su
+  horario.
+- El formulario no deja guardar una franja manual que se solape con otra
+  tarea activa (propia o de la app); muestra con cuál choca.
+- Una franja añadida o modificada a mano queda **fijada**: el planificador
+  cuenta su energía y no la mueve ni la borra.
+- Cancelar o detener una franja automática crea un **bloqueo** en ese tramo
+  hasta su fin original, para que el planificador no la recree.
+- Todo cambio manual se envía al cargador **al momento** (no espera al ciclo)
+  y se confirma leyendo de vuelta.
+
+**E3.6 Escritura en el cargador.**
+
+- Solo `POST`, `PUT` y `DELETE` en `/modules/scheduler/elements/mennekes`, a
+  través del cliente de lista cerrada. Nada más cambia respecto a las reglas de
+  `CLAUDE.md`.
+- **Tarea guardiana:** una tarea propia siempre activa, con fecha 31/12 a las
+  00:00 y 1 minuto, para que el cargador nunca quede sin tareas activas. El
+  sistema no la desactiva ni la borra nunca, ni en pausa. En cada ciclo
+  comprueba que existe y está activa; si falta o está inactiva, la recrea o
+  la reactiva y da un aviso. Con el contenedor parado sigue protegiendo,
+  porque vive en el cargador. Lleva un id reservado (`id_tarea_guardiana`,
+  inicialmente 9) y cuenta para el límite de 10 tareas.
+- Tareas propias registradas en una tabla (id de tarea ↔ franja). Una tarea que
+  no esté en esa tabla es **ajena** y nunca se modifica ni se borra.
+- Tareas con fecha (máscaras de día y mes) y `weekday 0`, una por franja o tramo.
+- En cada ciclo se comprueba que las tareas propias conservan su fecha y su
+  horario. Si alguna ha cambiado (p. ej. guardada desde la app, que la
+  convierte en diaria), se corrige y se da el aviso «tarea modificada fuera
+  del sistema». La Ayuda del formulario advierte de no editar desde la app las
+  franjas del planificador.
+- Reconciliación: plan deseado frente a lo que hay en el cargador → solo las
+  diferencias. Idempotente.
+- Tras cada escritura, `GET` del programador para confirmar.
+- Las tareas propias ya terminadas se borran para liberar huecos.
+- Cada escritura queda en una tabla de auditoría: instante, método, cuerpo,
+  respuesta y resultado.
+- Límite: como mucho una tanda de escrituras por ciclo, salvo cambios
+  manuales.
+
+**E3.7 Red de seguridad.**
+
+- El plan escrito en el cargador cubre siempre al menos
+  `horizonte_provisional_h` (48 h), con franjas provisionales donde aún no hay
+  precio. Si el sistema se cae, el cargador sigue cargando según lo escrito.
+- Las provisionales se ajustan cuando se publican los precios del día
+  siguiente.
+- **Aviso por correo** si el planificador lleva más de
+  `aviso_planificador_min` sin completar un ciclo. Lo comprueba un script en el
+  NAS, fuera del contenedor (como la renovación de certificados), leyendo la
+  hora del último ciclo en la base de datos. También aparece como aviso en el
+  formulario.
+
+**E3.8 Modo sombra y medida del ahorro.**
+
+- En sombra el plan se calcula y se guarda igual que en activo.
+- Para cada día se compara el coste de:
+  1. lo que se cargó de verdad;
+  2. lo que habría costado el plan;
+  3. cargar nada más enchufar (referencia).
+- El ahorro frente a 3 se muestra en el formulario y en Grafana, también en
+  modo activo.
+- **Plan efectivo** de un cuarto de hora: el del último cálculo del servicio
+  hecho antes de que empiece (los de `planificador plan` y `simular` no
+  cuentan).
+- La comparación es **por conexión** (de enchufar a desenchufar), con la
+  energía real E medida en esa conexión en los tres casos:
+  1. real: el coste de lo cargado (`v_coste_tramo`);
+  2. plan: E repartida en orden de hora en los cuartos del plan efectivo
+     dentro de la conexión; si el plan tenía menos que E, el resto se carga
+     en los primeros cuartos libres de la conexión, como la referencia;
+  3. referencia: E desde el enchufe, a la potencia de carga (E3.2).
+- Todo en SQL con `numeric`, con el precio de `planificador_config` y
+  `factor_contador`, como `v_coste_tramo`.
+
+**E3.9 Parámetros nuevos y agrupación.** Parámetros nuevos de la etapa 3:
+
+| Clave | Valor inicial | Rango |
+|---|---|---|
+| `modo_planificador` | sombra | sombra / activo / pausa |
+| `carga_oportunista` | sí | sí / no |
+| `umbral_oportunista_pct` | 60 | 20–90 |
+| `nivel_oportunista_pct` | 100 | 50–100 |
+| `margen_carga_pct` | 10 | 0–30 |
+| `margen_salida_min` | 30 | 0–120 |
+| `potencia_carga_inicial_kw` | 4,5 | 1,4–11 |
+| `ventana_disponibilidad_dias` | 28 | 7–90 |
+| `umbral_disponibilidad_pct` | 80 | 50–100 |
+| `historial_min_disponibilidad_dias` | 21 | 7–60 |
+| `horizonte_provisional_h` | 48 | 24–72 |
+| `franja_min_min` | 30 | 15–120 |
+| `max_tareas_sistema` | 7 | 1–9 |
+| `id_tarea_guardiana` | 9 | 1–10 |
+| `aviso_planificador_min` | 60 | 15–360 |
+| `ventana_precio_esperado_dias` | 28 | 7–90 |
+| `ventana_umbral_dias` | 7 | 3–28 |
+| `ventana_potencia_dias` | 28 | 7–90 |
+| `horizonte_plan_h` | 72 | 24–96 |
+| `hora_publicacion_precios` | 13:30 | 12:00–18:00 |
+
+`modo_planificador` no es una fila de `bateria_parametro` (valores numéricos
+con vigencia por día): vive en `planificador_modo` (E3.4). `carga_oportunista`
+se guarda como 1 (sí) o 0 (no). `hora_publicacion_precios` se guarda en
+minutos desde las 00:00 (810 = 13:30; unidad «hora») y se muestra y se
+escribe HH:MM en el formulario y en el CLI. Los cinco últimos parámetros se añadieron al
+aprobar el plan del paso 3a (18/11/2026), para no dejar constantes en el
+código.
+
+`max_tareas_sistema` cuenta solo las franjas: con la guardiana son 8 tareas
+propias y quedan 2 huecos para la app de Orbis.
+
+Con nombre, descripción, efecto y rango en `bateria_parametro_clave`, como los
+de la etapa 2.
+
+Agrupación de todos los parámetros (etapa 2 y 3): columnas nuevas `grupo` y
+`orden` en `bateria_parametro_clave`; la pantalla Parámetros y la sección
+Parámetros de la Ayuda se generan a partir de ellas, sin listas fijas en el
+código.
+
+| Grupo | Pregunta | Parámetros, en orden |
+|---|---|---|
+| 1. Coche y batería | ¿Cómo es el coche? | `capacidad_util_kwh`, `reserva_pct`, `tope_pct`, `factor_bateria`, `consumo_kwh_100km` |
+| 2. Estimación del nivel | ¿Cómo se calcula el % sin lecturas? | `desconexion_min_s`, `detectar_carga_completa`, `energia_min_calibracion_kwh`, `observaciones_calibracion`, `umbral_carga_externa_kwh` |
+| 3. Previsión de consumo | ¿Cuánto voy a gastar? | `percentil_planificacion`, `ventana_consumo_dias`, `consumo_inicial_trayecto_kwh` |
+| 4. Estrategia de carga | ¿Cuánto cargar y a qué precio? | `margen_carga_pct`, `margen_salida_min`, `carga_oportunista`, `umbral_oportunista_pct`, `nivel_oportunista_pct`, `ventana_precio_esperado_dias`, `ventana_umbral_dias` |
+| 5. Disponibilidad del coche | ¿Cuándo estará enchufado? | `ventana_disponibilidad_dias`, `umbral_disponibilidad_pct`, `historial_min_disponibilidad_dias` |
+| 6. Cargador y franjas (avanzado) | ¿Cómo se escribe en el cargador? | `potencia_carga_inicial_kw`, `ventana_potencia_dias`, `franja_min_min`, `max_tareas_sistema`, `horizonte_provisional_h`, `horizonte_plan_h`, `hora_publicacion_precios`, `id_tarea_guardiana` |
+| 7. Avisos y vigilancia | ¿Cuándo me avisa? | `aviso_sin_lectura_dias`, `hueco_muestreo_aviso_s`, `aviso_planificador_min` |
+
+- `modo_planificador` no aparece en Parámetros: se controla desde la cabecera
+  de «Plan de carga» (junto a «Cargar ahora»). Se guarda con historial como
+  cualquier parámetro.
+- `id_tarea_guardiana` se muestra pero no se edita desde el formulario
+  (cambiarlo dejaría una guardiana huérfana en el cargador); solo por CLI, que
+  migra la guardiana.
+- Cada grupo lleva una frase de propósito (la columna «Pregunta»), que se
+  muestra en la pantalla y en la Ayuda.
+
+**E3.10 Pantallas y Grafana.**
+
+- **Plan de carga** (pantalla nueva en el menú): modo actual y sus botones
+  (sombra/activo/pausa, Cargar ahora); franjas futuras y en curso con motivo
+  (necesaria para qué salida, margen, oportunista, provisional, manual), energía,
+  precio medio, coste, los dos estados y sus acciones; franjas de los últimos
+  días con lo real frente a lo planificado; ahorro.
+  - Bajo el selector de modo, una frase que explica el modo elegido (sombra:
+    calcula sin escribir; activo: escribe y revisa cada 15 min; pausa: no
+    escribe y desactiva sus franjas futuras), y la misma explicación como
+    texto emergente en cada opción. Bajo «Cargar ahora»: «Hasta el objetivo
+    de la próxima salida».
+  - Línea de tiempo de 60 h (24 h desplazable en móvil) con las filas
+    «Cargas programadas», «Precio €/kWh» y «Coche en casa». Cada franja es un
+    bloque coloreado por estado con su horario escrito debajo. Eje de precios
+    con marcas cada 0,10 €/kWh y líneas de guía, y la línea del umbral con su
+    valor. La banda «probable» marca los tramos con probabilidad ≥
+    `umbral_disponibilidad_pct`.
+  - Las franjas fuera de la vista se indican en la cabecera de la gráfica
+    («+1 franja después: mié 18/11 14:00 ▸», con enlace a la tabla); la línea
+    de tiempo no se alarga.
+- **Navegación:** «Plan de carga» en segundo lugar en la barra lateral. Barra
+  inferior del móvil: Inicio, Plan, Excepciones, Horario, Ajustes. Historial
+  sale de la barra; se llega desde Inicio («Historial de lecturas →») y desde
+  «Últimas franjas».
+- **Inicio:** panel «Próximas cargas» con las 2–3 siguientes franjas.
+- **Avisos nuevos:** escritura fallida; cargador distinto del plan; tarea
+  propia modificada fuera del sistema; guardiana ausente o inactiva (crítico);
+  ninguna tarea activa en el cargador (crítico); tarea ajena que pisa una
+  franja en curso; el plan no cubre una salida (ni saltando el umbral);
+  precios del día siguiente sin publicar a la hora esperada; planificador
+  parado.
+- **Grafana:** franjas como bandas sobre la gráfica de precios; panel de
+  ahorro.
+- **Parámetros** (pantalla existente, se rehace): un panel por grupo (E3.9).
+  Escritorio: índice lateral de grupos. Móvil: `<details>` por grupo, abiertos
+  «Coche y batería» y «Estrategia de carga». El grupo 6 va plegado con la
+  etiqueta «avanzado» también en escritorio. «Calibración sugerida» pasa al
+  grupo 1, junto a la eficiencia de carga. «Cambiar un valor» y «Últimos
+  cambios» se mantienen.
+- **Ayuda:** la sección Parámetros sigue la misma agrupación; añade la tarea
+  guardiana y el aviso de no editar desde la app las franjas del planificador.
+- Maquetas de Plan de carga (1d), Inicio con «Próximas cargas» (1a–1c) y
+  Parámetros agrupados (5): se añadirán a docs/formulario-maquetas.md antes
+  de 3b.
+
+### Decisiones del paso 3a (18/11/2026)
+
+- El algoritmo vive en Python puro (paquete `plan_carga/`, sin reloj ni base
+  de datos: todo llega en la entrada), porque solo ordena precios. El dinero
+  que se muestra (coste del plan, ahorro) se calcula en SQL con `numeric`, con
+  referencia en Python para los tests.
+- El paquete se llama `plan_carga/` porque `planificador.py` ya es el bucle
+  del colector; el CLI se llama `planificador`.
+- En sombra el planificador corre dentro del servicio `muestreo`, al final de
+  su ciclo de 60 s: cada 15 minutos, en cada conexión o desconexión, al
+  cerrarse una sesión y cuando hay una solicitud pendiente
+  (`planificador_solicitud`, que activan el formulario, el CLI y el colector
+  tras refrescar los precios). En 3c quien escribe en el cargador es un único
+  proceso, el que ya tiene el cliente. Un fallo del planificador no detiene
+  el muestreo.
+- `planificador simular` mira hacia atrás con los datos de hoy: el nivel está
+  reconciliado con lecturas posteriores y el horario no tiene historial (se
+  usa el actual).
+
+### Fuera de alcance
+
+- Calibración con Datadis (tarea posterior ya anotada).
+- Cambio de potencia contratada en valle.
+- Predicción de precios más allá de lo publicado (solo el perfil de 28 días
+  para las provisionales).
+
+### Pendiente de verificar con el coche
+
+- Qué mide `homePower`: en la carga libre del 18/11/2026 marcó 0 W (antes del
+  enchufe, unos 420 W) con `evsePower` a 4040 W (viaris-api.md, pendiente 5).
+  No bloquea la etapa 3.
+- Cómo reacciona el cargador a una tarea en curso borrada o con el horario
+  cambiado (desactivarla la corta).
+- Si guardar desde la app una tarea con fecha la convierte en diaria.
 
 ## Después de la etapa 3
 

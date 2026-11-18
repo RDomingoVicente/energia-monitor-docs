@@ -33,6 +33,7 @@ PUBLICADAS = {
     "0017_sesion_sin_muestreo.sql": "90e44f2c42f4f054884c61c5ec89a725086cc0f06a551eb5b9cb0b4af37e710c",
     "0018_evento_trayecto_partido.sql": "b6ee2147588392b4561a6ae5946a3431f08e06e9b18c1b0326d1d9659f0823ab",
     "0019_evento_carga_medida.sql": "1b8e52468253dd25cd075702f47ec328667746a5feb617d34c460ba974fb907c",
+    "0020_planificador.sql": "bd4e6e9b0a2ac9b908008e15cc64ca1efa347ff388c8845d7d713a1767174faf",
 }
 
 

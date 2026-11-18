@@ -1,9 +1,11 @@
 # Cargador Orbis Viaris: API HTTP local
 
-Estado a 13/11/2026. Fuentes: respuestas reales del cargador (marcadas
+Estado a 18/11/2026. Fuentes: respuestas reales del cargador (marcadas
 **verificado**) y lectura del JavaScript de su interfaz web, `index.js`
 (marcadas **del código**, sin probar). El alta, la modificación y el borrado de
-franjas se probaron el 13/11/2026 con franjas inactivas y sin coche conectado.
+franjas se probaron el 13/11/2026 con franjas inactivas y sin coche conectado;
+el comportamiento de las franjas con el coche conectado, el 17 y el 18/11/2026
+(ver "Comportamiento con el coche conectado").
 
 ## Equipo
 
@@ -102,8 +104,14 @@ en Wh, [15] a [17] energía por periodo (sin configurar: todo en el primero).
 Orígenes vistos: `schedman` (planificador) y `evsm` (el coche o la desconexión).
 Los campos [9] y [13] son un contador acumulado de energía (Wh) al inicio y al
 fin: [13] − [9] = [14] en las 100 sesiones del histórico del 13/11/2026
-(**verificado**). El búfer no está ordenado por fecha (la sesión más antigua
-puede ir al final).
+(**verificado**).
+
+Las sesiones del `body` van separadas por `\n` (el escape de JSON: en la
+respuesta en bruto se ve `\n` literal; con `jq -r` sale una por línea). El
+búfer **no está ordenado** por fecha (la sesión más antigua puede ir al final,
+visto el 13 y el 18/11/2026): para encontrar la sesión más reciente hay que
+ordenar por la marca de inicio ([6]) o de fin ([10]), no tomar la última línea.
+Así, `jq -r .body | tail -5` no da las cinco últimas sesiones.
 
 El búfer guarda 100 sesiones (unos 54 días con el uso actual): el colector debe
 leerlo y persistirlo de forma periódica. El contador del cargador da en torno
@@ -112,8 +120,11 @@ a un 4 % más que el contador de la distribuidora (octubre de 2026).
 ## Planificador
 
 `GET /modules/scheduler/elements?level=cfg` devuelve, por conector,
-`data.cfg.tasks[]` y `data.cfg.defaultState` (1 en este equipo; significado sin
-verificar).
+`data.cfg.tasks[]` y `data.cfg.defaultState` (1 en este equipo). Con
+`defaultState` 1, el cargador bloquea la carga fuera de las tareas solo si hay
+**al menos una tarea activa**; sin ninguna, carga libremente (verificado el 17
+y el 18/11/2026, ver más abajo). El significado exacto del valor sigue sin
+verificar (no se ha probado otro).
 
 Tarea real (franja de 02:00 a 06:00, activa):
 
@@ -134,9 +145,9 @@ Tarea real (franja de 02:00 a 06:00, activa):
 |-------|-------------|--------|
 | `type` | 0 franja de carga; 1 tramo de potencia de red (lleva `maxPower` en `timeList`) | del código |
 | `active` | 1 activa, 0 inactiva | verificado |
-| `hourMin`, `duration` | inicio y duración en minutos; la duración puede pasar de medianoche | verificado |
+| `hourMin`, `duration` | inicio y duración en minutos. La duración se acepta aunque pase de medianoche (y `_endLocaltime` la refleja), pero **la tarea deja de cargar a las 00:00**: una franja que cruce la medianoche se escribe como dos tareas | verificado (13/11 y noche del 17 al 18/11) |
 | `weekday` | máscara de bits, bit 0 = domingo (1 D, 2 L, 4 M, 8 X, 16 J, 32 V, 64 S); 0 = todos los días | verificado: 32 dio ocurrencia el viernes 13/11 y 65 no |
-| `day`, `month` | máscaras (bit d−1, bit m−1) para una fecha concreta; 0 = cualquiera. Sin año: la franja se repite cada año si no se borra | verificado el cálculo de la ocurrencia (4096/1024 = 13/11; 8192/1024 = 14/11); falta verla ejecutarse |
+| `day`, `month` | máscaras (bit d−1, bit m−1) para una fecha concreta, con `weekday` 0; 0 = cualquiera. Sin año: la franja se repite cada año si no se borra | verificado el cálculo de la ocurrencia (4096/1024 = 13/11; 8192/1024 = 14/11) y la ejecución ese día (17/11) |
 | `validFrom`, `validTo` | presumible ventana de validez | sin verificar |
 | `_initLocaltime`, `_endLocaltime` | calculados por el cargador, en UTC, también en franjas inactivas: la ocurrencia de hoy en franjas recurrentes (0 si hoy no aplica) y la de su fecha en franjas con `day` y `month` | verificado |
 
@@ -144,6 +155,12 @@ Tareas presentes el 12/11/2026: id 2 (00:00 a 01:00, todos los días,
 inactiva), id 4 (10:00 a 14:00, `weekday` 65, inactiva) e id 5 (02:00 a 06:00,
 `weekday` 32, activa). No hay tareas de tipo 1: rige el límite de red general
 de 4500 W.
+
+Estado el 18/11/2026: la tarea 9 es la **guardiana** (activa, con fecha 31/12
+a las 00:00 y 1 minuto; ver docs/fase2.md, E3.6) y las tareas 5 y 6 son del
+usuario, creadas con la app de Orbis (inactivas). Las tareas 2 y 4 del 12/11
+las borró el usuario el 15/11. Ninguna de las tres la toca el código;
+hasta el paso 3c de la etapa 3 el código no escribe en el cargador.
 
 ### Escrituras (verificadas el 13/11/2026)
 
@@ -165,6 +182,28 @@ Las tres devuelven 200 y la configuración completa del conector (`cfg` y
 `stat`), y la app e-VIARIS refleja el cambio. El PUT se probó con la tarea
 completa, como hace la interfaz; el cuerpo parcial está sin probar. El DELETE
 de varias tareas en una petición está sin probar.
+
+### Comportamiento con el coche conectado (verificado el 17 y el 18/11/2026)
+
+| Hecho | Prueba |
+|-------|--------|
+| Con al menos una tarea activa, el coche enchufado no carga fuera de las tareas | 15/11 y 18/11 |
+| **Sin ninguna tarea activa, carga libremente** en cuanto el coche está enchufado | 17/11 20:16 (sesión de 53 s al desactivar todas) y 18/11 08:47 (estado 6, 4040 W) |
+| Una única tarea activa con fecha de otro día basta para bloquear la carga; al **reactivarla** durante una carga libre, la carga se corta al momento | 18/11 08:45–08:48, tarea 9 (31/12 00:00, 1 min) |
+| Una tarea con fecha (`day` y `month`, `weekday` 0) se ejecuta ese día | 17/11, tarea 9 con fecha 17/11 desde las 23:00, sin tareas semanales activas |
+| **Una tarea no cruza la medianoche**: con `hourMin` 1380 y `duration` 540, el cargador cortó a las 00:00:01 (inicio y fin `schedman`, 4,6 kWh) aunque `_endLocaltime` marcaba las 08:00. Probablemente comprueba la fecha o el día de la semana en cada instante (sin verificar) | noche del 17 al 18/11 |
+| La tarea se cumple al segundo: inicio 02:00:01, fin 06:00:01 | sesión del 16/11 |
+| **Desactivar una tarea en curso** (`active: 0`) corta la carga | 17/11, desde la app de Orbis |
+| El cargador **no impide solapes**: acepta y activa dos tareas activas que se pisan, sin error (HTTP 200) | 17/11, tarea 9 sobre las tareas 5 y 6 |
+| La app de Orbis solo crea tareas semanales y parte en dos, a medianoche, las franjas que la cruzan (23:00 + 59 min y 00:00 + 480 min, con un minuto sin carga entre ambas) | 17/11 |
+| La app muestra una tarea con fecha como «todos los días»; si se guarda desde la app, probablemente pierde la fecha (sin verificar) | 17/11 |
+
+Consecuencia para el código: una franja que cruce la medianoche se escribe
+como dos tareas, una hasta las 00:00 y otra desde las 00:00, como hace la app;
+y debe haber siempre una tarea activa (la guardiana) para que el cargador no
+cargue libremente.
+
+### Respuesta de `stat`
 
 `stat` del planificador (visto en esas respuestas, sin coche): `idTask` 0,
 `idTaskPower` 0, `state` 0, `active` 1, `priority` 255. Presumiblemente indica
@@ -229,14 +268,20 @@ cargador (+0,08 %), y el servicio `muestreo` del NAS, con 180 muestras,
 
 ## Pendiente de verificar (con el coche conectado)
 
-1. Que una franja activa con fecha concreta inicia y detiene la carga.
-2. Qué hace el cargador sin ninguna franja activa (`defaultState`) y qué
-   significan los campos de `stat` del planificador.
-3. Cómo reacciona a una franja creada, modificada o borrada durante una carga.
-4. Diferencia entre los estados 3 y 4 (el 3 no ha aparecido), y confirmar
+1. Qué significan los campos de `stat` del planificador (`idTask`,
+   `idTaskPower`, `state`) durante una carga.
+2. Cómo reacciona a una tarea **borrada** o con el **horario cambiado**
+   durante una carga (desactivarla la corta: verificado el 17/11/2026).
+3. Diferencia entre los estados 3 y 4 (el 3 no ha aparecido), y confirmar
    que el 5 es una pausa pedida por el coche (visto un minuto el 16/11/2026).
-5. Calibración de `evsePower` frente a `totalPower` (la pinza) con la curva
+4. Calibración de `evsePower` frente a `totalPower` (la pinza) con la curva
    horaria de i-DE.
+5. Qué mide `homePower`. Durante la carga libre del 18/11/2026 a las 08:47
+   marcó 0 W cuando antes del enchufe estaba en unos 420 W, con `evsePower`
+   a 4040 W. Coincide con lo visto el 14/11 (`homePower` = 0 mientras carga,
+   ver "Potencias del modulador"), pero vuelve a poner en duda que sea el
+   consumo de la casa. Sin resolver; no cambia nada en el código.
+6. Si guardar desde la app una tarea con fecha la convierte en diaria.
 
 Sin coche: PUT con cuerpo parcial, DELETE múltiple, `validFrom` y `validTo`,
 y si `selectorPower` (4600 W) es un selector físico que limita los 32 A.

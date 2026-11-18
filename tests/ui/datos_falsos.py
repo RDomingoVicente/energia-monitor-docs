@@ -143,12 +143,46 @@ def parametros(_conn: object, _ahora: object) -> d.Parametros:
               "detectar_carga_completa": ("Detectar carga completa", "sí/no", 0, 1, 1),
               "hueco_muestreo_aviso_s": ("Aviso hueco de muestreo", "s", 300, 14400, 1800),
               "aviso_sin_lectura_dias": ("Aviso sin lecturas", "días", 1, 14, 7),
-              "umbral_carga_externa_kwh": ("Umbral de carga externa", "kWh", 1, 30, 5)}
+              "umbral_carga_externa_kwh": ("Umbral de carga externa", "kWh", 1, 30, 5),
+              # 0020: planificador de carga.
+              "carga_oportunista": ("Carga oportunista", "sí/no", 0, 1, 1),
+              "umbral_oportunista_pct": ("Umbral barato", "%", 20, 90, 60),
+              "nivel_oportunista_pct": ("Nivel oportunista", "%", 50, 100, 100),
+              "margen_carga_pct": ("Margen de carga", "%", 0, 30, 10),
+              "margen_salida_min": ("Margen antes de salir", "min", 0, 120, 30),
+              "potencia_carga_inicial_kw": ("Potencia de carga inicial", "kW", "1.4", 11, "4.5"),
+              "ventana_disponibilidad_dias": ("Ventana de disponibilidad", "días", 7, 90, 28),
+              "umbral_disponibilidad_pct": ("Umbral de disponibilidad", "%", 50, 100, 80),
+              "historial_min_disponibilidad_dias": ("Historial mínimo", "días", 7, 60, 21),
+              "horizonte_provisional_h": ("Horizonte escrito", "h", 24, 72, 48),
+              "franja_min_min": ("Franja mínima", "min", 15, 120, 30),
+              "max_tareas_sistema": ("Franjas máximas", "n", 1, 9, 7),
+              "id_tarea_guardiana": ("Tarea guardiana", "n", 1, 10, 9),
+              "aviso_planificador_min": ("Aviso planificador parado", "min", 15, 360, 60),
+              "ventana_precio_esperado_dias": ("Ventana del precio esperado", "días", 7, 90, 28),
+              "ventana_umbral_dias": ("Ventana del umbral", "días", 3, 28, 7),
+              "ventana_potencia_dias": ("Ventana de potencia", "días", 7, 90, 28),
+              "horizonte_plan_h": ("Horizonte del plan", "h", 24, 96, 72),
+              "hora_publicacion_precios": ("Publicación de precios", "hora", 720, 1080, 810)}
+    # Grupo y orden de la 0020 (E3.9).
+    grupos = {1: ("capacidad_util_kwh", "reserva_pct", "tope_pct", "factor_bateria", "consumo_kwh_100km"),
+              2: ("desconexion_min_s", "detectar_carga_completa", "energia_min_calibracion_kwh",
+                  "observaciones_calibracion", "umbral_carga_externa_kwh"),
+              3: ("percentil_planificacion", "ventana_consumo_dias", "consumo_inicial_trayecto_kwh"),
+              4: ("margen_carga_pct", "margen_salida_min", "carga_oportunista", "umbral_oportunista_pct",
+                  "nivel_oportunista_pct", "ventana_precio_esperado_dias", "ventana_umbral_dias"),
+              5: ("ventana_disponibilidad_dias", "umbral_disponibilidad_pct", "historial_min_disponibilidad_dias"),
+              6: ("potencia_carga_inicial_kw", "ventana_potencia_dias", "franja_min_min", "max_tareas_sistema",
+                  "horizonte_provisional_h", "horizonte_plan_h", "hora_publicacion_precios", "id_tarea_guardiana"),
+              7: ("aviso_sin_lectura_dias", "hueco_muestreo_aviso_s", "aviso_planificador_min")}
+    grupo_de = {c: g for g, claves in grupos.items() for c in claves}
+    textos = {c: textos[c] for g in grupos for c in grupos[g]}
     vigentes = [d.Parametro(c, n, u, D(str(mi)), D(str(ma)),
                             "Fracción de la energía medida por el cargador que llega a la batería (pérdidas de carga). "
                             "Valor inicial estimado.",
                             "Se calibra con lecturas antes y después de cargar, sin trayectos entre ellas. No afecta al "
-                            "coste: se paga lo que mide el cargador.", D(str(v)), "usuario", date(2025, 1, 1), i)
+                            "coste: se paga lo que mide el cargador.", D(str(v)), "usuario", date(2025, 1, 1), i,
+                            grupo_de[c], c != "id_tarea_guardiana")
                 for i, (c, (n, u, mi, ma, v)) in enumerate(textos.items(), 1)]
     cambios = [d.Cambio(20, "consumo_inicial_trayecto_kwh", date(2026, 11, 13), D(25), None,
                         "indicado por el usuario al revisar el consumo de la semana"),

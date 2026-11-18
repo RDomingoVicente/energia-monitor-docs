@@ -94,7 +94,8 @@ def _parser() -> argparse.ArgumentParser:
     registrar.add_argument("--clave", required=True)
     registrar.add_argument("--periodo", default="*", help="'*' o P1..P6 según la clave")
     registrar.add_argument("--desde", type=date.fromisoformat, required=True)
-    registrar.add_argument("--valor", type=Decimal, required=True, help="en la unidad de la clave")
+    registrar.add_argument("--valor", required=True,
+                           help="en la unidad de la clave; las horas (hora_publicacion_precios), HH:MM")
     registrar.add_argument("--origen", required=True, choices=parametros.ORIGENES_BATERIA,
                            help="contrato (pactado), regulado (norma publicada) o estimado; en la batería,"
                                 " también usuario y ficha_tecnica")
@@ -288,31 +289,33 @@ def _parametro(args: argparse.Namespace) -> int:
                 print(f"Parámetros de {args.contrato} vigentes el {fecha}:")
                 filas = parametros.listar_parametros(conn, args.contrato, fecha)
             for clave, periodo, valor, unidad, origen, vigencia, fuente in filas:
-                texto = "sin valor" if valor is None else f"{valor} {unidad}"
+                texto = "sin valor" if valor is None else parametros.texto_de_valor(valor, unidad)
                 print(f"  {clave:<28} {periodo:<3} {origen:<13} {texto}  {vigencia}  [{fuente}]")
             return 0
         try:
+            valor = parametros.valor_de_texto(
+                args.valor, parametros.unidad_bateria(conn, args.clave) if bateria else None)
             if cargador:
                 registro = parametros.registrar_parametro_cargador(
-                    conn, clave=args.clave, desde=args.desde, valor=args.valor,
+                    conn, clave=args.clave, desde=args.desde, valor=valor,
                     origen=args.origen, fuente=args.fuente, nota=args.nota,
                 )
             elif bateria:
                 registro = parametros.registrar_parametro_bateria(
-                    conn, clave=args.clave, desde=args.desde, valor=args.valor,
+                    conn, clave=args.clave, desde=args.desde, valor=valor,
                     origen=args.origen, fuente=args.fuente, nota=args.nota,
                 )
             else:
                 registro = parametros.registrar_parametro(
                     conn, contrato=args.contrato, clave=args.clave, periodo=args.periodo, desde=args.desde,
-                    valor=args.valor, origen=args.origen, fuente=args.fuente, nota=args.nota,
+                    valor=valor, origen=args.origen, fuente=args.fuente, nota=args.nota,
                 )
         except parametros.ErrorParametro as e:
             log.error("%s", e)
             return 1
         if registro.cerrada:
             log.info("vigencia anterior %s cerrada el %s", registro.cerrada, args.desde)
-        log.info("registrado %s/%s = %s con vigencia %s", args.clave, args.periodo, args.valor, registro.nueva)
+        log.info("registrado %s/%s = %s con vigencia %s", args.clave, args.periodo, valor, registro.nueva)
         # Los parámetros del cargador se leen en directo; los de contrato entran en el precio; los
         # de la batería, en el nivel y los trayectos guardados.
         if cargador:

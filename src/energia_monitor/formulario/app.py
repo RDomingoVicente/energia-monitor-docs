@@ -521,16 +521,17 @@ class App:
                                                  v.get("nota", "")[:80])
         ahora = self.reloj()
         d = datos.parametros(conn, ahora)
-        elegido = next((x for x in d.vigentes if x.clave == form.clave), None)
+        elegido = next((x for x in d.vigentes if x.clave == form.clave and x.editable), None)
         if elegido is None:
             form.clave = "reserva_pct"
             form.errores["clave"] = "Elige un parámetro de la lista."
             return self.get_parametros(conn, marco, p, form, 422)
         valor = None
         try:
-            valor = pantalla_parametros.a_unidad_guardada(elegido, Decimal(form.valor.replace(",", ".")))
-        except InvalidOperation:
-            form.errores["valor"] = f"Indica un número ({pantalla_parametros.unidad_entrada(elegido)})."
+            valor = pantalla_parametros.leer_valor(elegido, form.valor)
+        except parametros.ErrorParametro:
+            form.errores["valor"] = ("Indica la hora (HH:MM)." if elegido.unidad == parametros.UNIDAD_HORA
+                                     else f"Indica un número ({pantalla_parametros.unidad_entrada(elegido)}).")
         hoy = formato.local(ahora).date()
         desde = None
         try:

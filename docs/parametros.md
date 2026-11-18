@@ -237,3 +237,41 @@ Una excepción con consumo indicado con fecha de hoy o pasada cambia
 trayectos ya guardados: después, `bateria recalcular`. El horario y las excepciones futuras no lo
 necesitan.
 
+
+## Planificador de carga (fase 2, etapa 3)
+
+Especificación: docs/fase2.md, "Etapa 3: planificador de carga" (E3.9). Los
+parámetros del planificador viven en `bateria_parametro`, con las mismas
+reglas que los de la batería (CLI con `--ambito bateria`). Migración 0020:
+
+- 19 claves nuevas (estrategia, disponibilidad, cargador y franjas, avisos),
+  vigentes desde el 1/1/2025 con los valores de E3.9.
+- Todas las claves tienen `grupo` y `orden` (`bateria_parametro_grupo`: 7
+  grupos con su pregunta); la pantalla Parámetros y la Ayuda las ordenan así.
+  Una clave nueva en una migración futura debe llevar grupo y orden (son NOT
+  NULL).
+- `editable` = false en `id_tarea_guardiana`: la página no deja cambiarla;
+  solo el CLI. Hasta el paso 3c no tiene efecto (el código no escribe en el
+  cargador); desde 3c, cambiarla exige migrar la guardiana.
+- `carga_oportunista` va como 0/1. `hora_publicacion_precios` (unidad
+  «hora») se guarda en minutos desde las 00:00 (810 = 13:30, rango
+  720–1080), pero en la página y en el CLI se escribe y se muestra HH:MM:
+
+  ```sh
+  docker compose exec collector python -m energia_monitor parametro registrar --ambito bateria \
+    --clave hora_publicacion_precios --desde 2026-12-01 --valor 14:00 --origen usuario --fuente "OMIE"
+  ```
+
+  El CHECK de valores de 0014 se sustituye en la 0020 (enteros, 0/1,
+  márgenes con 0, horas en minutos de 0 a 1439).
+
+Fuera de `bateria_parametro`:
+
+- `planificador_modo` (sombra, activo o pausa, desde un instante, con
+  historial). En el paso 3a solo hay sombra y no hay forma de cambiarlo.
+- `planificador_config` (una fila): contrato y fuente del precio del
+  planificador (`vivienda`, `omie`). Solo por SQL:
+
+  ```sql
+  UPDATE planificador_config SET fuente = 'omie';
+  ```
