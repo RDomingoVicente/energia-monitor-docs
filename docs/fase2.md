@@ -617,7 +617,13 @@ Entrega (E3.11):
 | 3c | Escritura y reconciliación, franjas manuales, Detener, modo activo, auditoría | Sí |
 | 3d | Aviso por correo, avisos nuevos, Grafana | — |
 
-Entre 3b y 3c, al menos una semana en sombra revisando el plan y el ahorro.
+Entre 3b y la activación, en lugar de una semana en sombra (cambio del
+18/11/2026): una simulación en seco de 3c en el NAS. La v0.7.0 en modo sombra
+lee el programador y registra en la auditoría las escrituras que haría, sin
+hacerlas, durante una o dos noches que cubran al menos una franja partida a
+medianoche, la publicación de los precios del día siguiente con su recálculo
+y una desconexión y reconexión del coche. Después, las pruebas de escritura a
+mano y la activación.
 
 1. Paso 3.0, pruebas del cargador: hecho (17 y 18/11/2026; E3.1 y
    viaris-api.md).
@@ -1103,6 +1109,59 @@ código.
     minutos de reloj local. En las noches del cambio de hora la duración es la
     de reloj (sin verificar en el cargador; se comprueba en 3c y en el cambio
     de hora del 28/03/2027).
+
+### Plan del paso 3c (v0.7.0, 18/11/2026)
+
+Plan aceptado con estas decisiones del usuario:
+
+- **Cliente del cargador:** lista cerrada exacta con `GET
+  /modules/scheduler/elements?level=cfg` y `POST`, `PUT`, `DELETE
+  /modules/scheduler/elements/mennekes`. Cada escritura se valida antes de
+  conectar: una tarea por petición, tipo 0, id 1–10, con fecha (`day` y
+  `month` con un único bit, `weekday` 0), sin cruzar la medianoche;
+  `DELETE` solo `{"tasks":[{"id":N}]}`. Solo los formatos verificados el
+  13/11 (POST con id libre, PUT con la tarea completa, DELETE de una). El
+  cliente recibe los ids propios y rechaza tocar uno ajeno. Tras cada
+  escritura, GET de confirmación.
+- **Migración 0022:** `planificador_tarea` (tareas propias: id, papel,
+  fecha, horario, activa, estado en el cargador), `plan_manual`,
+  `plan_bloqueo`, `plan_auditoria` (real o en seco), `planificador_lectura`
+  (última lectura del programador), cola de acciones manuales y parámetro
+  `congelar_franja_min` (30).
+- **Reconciliador puro:** guardiana primero (nunca se desactiva ni se
+  borra; el cargador nunca queda sin tareas activas); ajenas nunca se
+  tocan y en activo se respetan y su energía se descuenta de la necesaria;
+  franja en curso intocable salvo Detener; franjas que empiezan en menos de
+  `congelar_franja_min` también congeladas; solo diferencias, una tanda por
+  ciclo; pausa desactiva las propias futuras.
+- **Guardiana:** antes de crearla se comprueba que el id
+  (`id_tarea_guardiana`) está libre o ya es la guardiana; si lo ocupa otra
+  tarea (p. ej. la de prueba del 17/11), no se crea encima: aviso crítico y
+  se resuelve a mano o con `planificador guardiana --id N`.
+- **Orden de escritura:** la tarea propia se registra como pendiente en
+  `planificador_tarea` antes del POST; después, POST y GET de confirmación.
+- **Caducadas:** las máscaras no llevan año: una tarea propia terminada y
+  no borrada se repetiría al año siguiente. Borrarla es obligatorio; aviso
+  crítico si queda alguna caducada.
+- **Acciones manuales** (modo, Cargar ahora, Detener, Modificar, Eliminar,
+  Añadir franja): el formulario no habla con el cargador. La tabla es la
+  cola; `NOTIFY` solo despierta al muestreo, que procesa las pendientes al
+  arrancar, en cada ciclo y al recibir el aviso, bajo un
+  `pg_advisory_lock`. Detener se reintenta en el acto y, si falla, el
+  formulario ofrece «Reintentar».
+- **Avisos críticos en 3c:** guardiana ausente, inactiva u ocupada; ninguna
+  tarea activa; escritura fallida; tarea propia modificada fuera; tarea
+  propia caducada sin borrar; cargador distinto del plan. Correo y resto de
+  avisos, en 3d.
+- **CLI:** `planificador modo`, `tareas`, `reconciliar --en-seco`,
+  `limpiar` (pasa a sombra y borra las propias salvo la guardiana; avisa de
+  que con solo la guardiana activa el coche no cargará) y `guardiana --id N`.
+- **Despliegue por pasos** (sustituye a la semana en sombra, E3.11):
+  simulación en seco en el NAS (v0.7.0 en sombra, lee el programador y
+  registra en la auditoría lo que haría), pruebas de escritura a mano con
+  la skill `viaris` (incluido un POST con un id ya ocupado, para ver si
+  sobrescribe o da error), el usuario desactiva en la app sus tareas 5 y 6
+  sin borrarlas, y activación de día con la primera noche vigilada.
 
 ### Fuera de alcance
 

@@ -19,11 +19,15 @@ barata (E3.0). Se entrega en pasos que se revisan uno a uno (E3.11).
    del muestreo.**
 3. **3b, pantalla Plan de carga y panel de Inicio** (solo lectura), cuando las
    maquetas 1a–1d y 5 estén en docs/formulario-maquetas.md.
-4. Al menos una semana en sombra revisando el plan y el ahorro.
-5. **3c, escritura y reconciliación**: `GET` del programador y escrituras en
-   `/modules/scheduler/elements/mennekes` en la lista cerrada, guardiana,
-   franjas manuales, Detener, modo activo y auditoría. Plan propio antes de
-   empezar.
+4. ~~Al menos una semana en sombra~~: sustituida el 18/11/2026 por la
+   simulación en seco de 3c (E3.11).
+5. **3c, escritura y reconciliación (v0.7.0)**: plan aceptado el 18/11/2026
+   («Plan del paso 3c» en docs/fase2.md). Antes de activar: simulación en
+   seco en el NAS (una o dos noches con una franja partida a medianoche, la
+   publicación de los precios del día siguiente con su recálculo y una
+   desconexión y reconexión del coche), pruebas de escritura a mano
+   (incluido un POST con un id ocupado) y tareas 5 y 6 desactivadas en la
+   app.
 6. **3d, avisos**: correo desde el NAS, avisos nuevos y Grafana.
 
 ## Paso 3a
