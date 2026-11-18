@@ -115,6 +115,16 @@ def test_plan_en_modo_prudente(conn: psycopg.Connection, limpio: None) -> None:
     assert ms < 2000
 
 
+def test_sin_lecturas_no_se_planifica(conn: psycopg.Connection, limpio: None) -> None:
+    escenario(conn)
+    conn.execute("DELETE FROM bateria_lectura")
+    conn.execute("SELECT recalcular_bateria(%s)", (AHORA,))
+    _, ctx, plan, ms = ps.calcular(conn, AHORA)
+    assert ctx.sin_nivel and plan.cuartos == () and plan.franjas == ()
+    assert plan.avisos == ("Sin nivel de batería (ninguna lectura): no se planifica.",)
+    assert ms == ms.quantize(D("0.1"))
+
+
 def test_precios_provisionales_hasta_la_hora_de_publicacion(conn: psycopg.Connection, limpio: None) -> None:
     ahora = local(11, 13)
     escenario(conn, ahora)

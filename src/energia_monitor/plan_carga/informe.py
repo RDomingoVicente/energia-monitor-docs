@@ -76,10 +76,11 @@ def lineas_plan(e: Entrada, ctx: Contexto, plan: Plan, milisegundos: Decimal) ->
 def lineas_simulacion(s: Simulacion) -> list[str]:
     lineas = lineas_plan(s.entrada, s.contexto, s.plan, s.milisegundos)
     if s.conexion is None or s.ahorro is None:
-        return [*lineas, "Sin conexión cerrada que contenga ese instante: no hay comparación."]
+        return [*lineas, "Sin conexión que contenga ese instante: no hay comparación."]
     a = s.ahorro
     inicio, fin = s.conexion
-    lineas.append(f"Conexión {_t(inicio)} – {_t(fin)}: {_n(a.energia_cargador_kwh, 2)} kWh medidos por el cargador")
+    lineas.append(f"Conexión {_t(inicio)} – {_t(fin)}" + (" (aún abierta: hasta la última muestra)" if s.abierta else "")
+                  + f": {_n(a.energia_cargador_kwh, 2)} kWh medidos por el cargador")
     if a.sin_precio:
         return [*lineas, "  Falta el precio o factor_contador de algún cuarto: sin costes."]
     for nombre, euros in (("real", a.coste_real_eur), ("plan", a.coste_plan_eur),

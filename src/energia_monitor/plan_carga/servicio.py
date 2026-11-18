@@ -126,7 +126,7 @@ def cargar_entrada(conn: psycopg.Connection, ahora: datetime, *, con_en_curso: b
     entrada = Entrada(
         ahora=ahora, parametros=parametros, nivel_kwh=nivel if nivel is not None else Decimal(0),
         conectado=_conectado(conn, ahora), prudente=dias < int(p["historial_min_disponibilidad_dias"]),
-        umbral=umbral, cuartos=tuple(cuartos), salidas=salidas if nivel is not None else (),
+        umbral=umbral, cuartos=tuple(cuartos), salidas=salidas,
         horizonte_fin=horizonte_fin, ocupados=tuple(ocupados),
         en_curso=_en_curso(conn, ahora) if con_en_curso else None, respetar_ajenas=respetar_ajenas)
     return entrada, Contexto(modo, dias, capacidad, factor[0] if factor else None, nivel is None)
@@ -136,11 +136,12 @@ def calcular(conn: psycopg.Connection, ahora: datetime, **kw: object) -> tuple[E
     """Entrada, plan y milisegundos (lectura y cálculo)."""
     inicio = time.monotonic()
     entrada, ctx = cargar_entrada(conn, ahora, **kw)  # type: ignore[arg-type]
-    plan = planificar(entrada)
     if ctx.sin_nivel:
-        plan = Plan(plan.cuartos, plan.franjas, plan.salidas,
-                    ("Sin nivel de batería (ninguna lectura): no se planifica para las salidas.", *plan.avisos))
-    return entrada, ctx, plan, Decimal(round((time.monotonic() - inicio) * 1000, 1))
+        # Sin ninguna lectura no hay nivel: ni necesaria ni hasta dónde llega el oportunista. No se planifica.
+        plan = Plan((), (), (), ("Sin nivel de batería (ninguna lectura): no se planifica.",))
+    else:
+        plan = planificar(entrada)
+    return entrada, ctx, plan, Decimal(f"{(time.monotonic() - inicio) * 1000:.1f}")
 
 
 def guardar(conn: psycopg.Connection, entrada: Entrada, ctx: Contexto, plan: Plan, motivo: str,
@@ -264,6 +265,7 @@ class Simulacion:
     milisegundos: Decimal
     conexion: tuple[datetime, datetime] | None
     ahorro: Ahorro | None
+    abierta: bool = False  # conexión aún abierta: se compara hasta la última muestra
 
 
 def instante_de_simulacion(conn: psycopg.Connection, dia: date, desde: str | None) -> datetime | None:
@@ -281,11 +283,17 @@ def simular(conn: psycopg.Connection, ahora: datetime) -> Simulacion:
     """Plan calculado en `ahora` (sin la franja en curso de cálculos guardados) y su ahorro en la conexión
     que contiene ese instante, con la referencia en Python de v_plan_ahorro. No guarda nada."""
     entrada, ctx, plan, ms = calcular(conn, ahora, con_en_curso=False)
-    fila = conn.execute("SELECT inicio, fin FROM plan_conexiones(%s, %s) WHERE fin IS NOT NULL ORDER BY inicio"
-                        " LIMIT 1", (ahora, ahora + timedelta(seconds=1))).fetchone()
+    fila = conn.execute("SELECT inicio, fin FROM plan_conexiones(%s, %s) ORDER BY inicio LIMIT 1",
+                        (ahora, ahora + timedelta(seconds=1))).fetchone()
     if fila is None:
         return Simulacion(entrada, ctx, plan, ms, None, None)
     inicio, fin = fila
+    abierta = fin is None
+    if abierta:
+        ultima = conn.execute("SELECT max(instante) FROM cargador_muestra").fetchone()
+        if ultima is None or ultima[0] is None or ultima[0] <= inicio:
+            return Simulacion(entrada, ctx, plan, ms, None, None)
+        fin = ultima[0]
     energia = dict(conn.execute("SELECT inicio, coche_wh FROM energia_tramo WHERE inicio >= %s AND inicio < %s",
                                 (cuarto_de(inicio), fin)))
     precio = dict(conn.execute("SELECT inicio, precio_final_eur_kwh FROM v_plan_precio WHERE inicio >= %s"
@@ -297,4 +305,4 @@ def simular(conn: psycopg.Connection, ahora: datetime) -> Simulacion:
         (inicio.astimezone(MADRID).date(), fin.astimezone(MADRID).date())))
     plan_kwh = {c.inicio: c.kwh for c in plan.cuartos}
     ahorro = ahorro_conexion(inicio, fin, energia, plan_kwh, potencia, precio, factores.get)
-    return Simulacion(entrada, ctx, plan, ms, (inicio, fin), ahorro)
+    return Simulacion(entrada, ctx, plan, ms, (inicio, fin), ahorro, abierta)
