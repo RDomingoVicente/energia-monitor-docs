@@ -20,4 +20,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: requiere PostgreSQL (PGHOST)"]
+markers = ["integration: requiere PostgreSQL (PGHOST)",
+           "lento: tandas largas de casos aleatorios (PLAN_LENTO=1)"]

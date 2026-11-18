@@ -1018,6 +1018,43 @@ código.
 - `planificador simular` mira hacia atrás con los datos de hoy: el nivel está
   reconciliado con lecturas posteriores y el horario no tiene historial (se
   usa el actual).
+- Algoritmo (`plan_carga/algoritmo.py`, función pura `planificar`):
+  - Nivel 1 por salidas en orden: para cada una, los cuartos más baratos que
+    terminan antes de la salida − margen (para la próxima, primero la
+    ventana segura). Un cuarto elegido para una salida posterior puede caer
+    antes de una anterior: así se acumula la energía de las salidas sin otra
+    ventana. Con potencia uniforme coincide con la búsqueda exhaustiva
+    (test).
+  - Los cuartos del margen antes de cada salida no se usan para ningún nivel.
+  - El nivel nunca pasa del tope por el plan: si las tareas fijas del usuario
+    ya lo superan, el plan no añade energía.
+  - Franja corta necesaria: se comparan alargarla hasta `franja_min_min`
+    (cuartos vecinos) y descartarla reponiendo su energía (bordes de otras
+    franjas o una franja nueva de la duración mínima); gana la de menor
+    coste. Sin alternativa, se queda corta.
+  - Franja corta de margen u oportunista (revisión del 18/11/2026): se alarga
+    solo con cuartos que cumplan su nivel (bajo el umbral, precio publicado,
+    sin pasar de `tope_pct` ni, si es oportunista, de
+    `nivel_oportunista_pct`); si no los hay, se descarta.
+  - La consolidación puede añadir energía necesaria después de elegir la
+    oportunista. Si con ella algún punto pasa de `nivel_oportunista_pct`, se
+    quitan los cuartos oportunistas más caros de los bordes de sus franjas
+    (sin partirlas ni dejarlas cortas). Solo puede quedar por encima por un
+    cuarto oportunista en medio de una franja.
+  - Tests reproducibles: semillas fijas, con la semilla en el id del test
+    (`[semilla=77]`). La tanda larga (8000 casos) va marcada `lento`:
+    `PLAN_LENTO=1 pytest -m lento tests/test_plan_carga.py`.
+  - Al alargar una franja o cerrar un hueco, los cuartos añadidos llevan el
+    nivel de la franja y cumplen sus reglas (antes de su salida − margen; si
+    es margen u oportunista, baratos y publicados). Si el coche ya está al
+    tope, el cuarto entra en la franja con 0 kWh.
+  - Más tareas que `max_tareas_sistema`: se cierra el hueco más barato que
+    reduzca tareas; sin huecos cerrables, se quita la franja opcional más
+    cara; si solo quedan necesarias, aviso.
+  - Tareas de una franja: una por día local; `hourMin` y `duration` en
+    minutos de reloj local. En las noches del cambio de hora la duración es la
+    de reloj (sin verificar en el cargador; se comprueba en 3c y en el cambio
+    de hora del 28/03/2027).
 
 ### Fuera de alcance
 
