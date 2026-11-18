@@ -149,3 +149,42 @@ Comprobación: desde un dispositivo no permitido,
 `curl -m 5 https://rdv-nas.tail1aac93.ts.net:8421/salud` no debe conectar. Esta
 sección no está verificada en tu tailnet: revisa la política con la vista
 previa de la consola antes de guardarla.
+
+## Actualizar a una versión con migraciones
+
+Probado con v0.6.0 (migración 0020) el 18/11/2026. Desde
+/volume1/docker/energia-monitor, con el coche sin cargar (si hay que parar el
+muestreo, se pierde lo que cargue mientras):
+
+1. Copia de seguridad con fecha:
+   `docker compose exec -T db pg_dump -U energia -d energia -Fc > backups/energia-AAAA-MM-DD-antes-vX.Y.Z.dump`.
+2. Comprobar que se lee restaurándola en una base temporal (tarda uno o dos
+   minutos: rehace `mv_precio_final`; no interrumpir):
+   `docker compose cp backups/<copia>.dump db:/tmp/verif.dump` y
+   `docker compose exec db sh -c 'createdb -U energia -T template0 energia_verif && pg_restore -U energia -d energia_verif --no-owner --no-privileges /tmp/verif.dump && psql -U energia -d energia_verif -Atc "SELECT max(version) FROM schema_migrations" && dropdb -U energia energia_verif && rm /tmp/verif.dump && echo VERIFICADO'`.
+   Con `-T template0`: si `template1` tuviera la colación desfasada (abajo),
+   `createdb` sin él falla.
+3. `COLLECTOR_TAG=vX.Y.Z` en `.env`, `docker compose pull`,
+   `docker compose run --rm --no-deps collector python -m energia_monitor migrar`
+   y `docker compose up -d`.
+
+## Colación de PostgreSQL al cambiar de imagen
+
+El 14/11/2026 la imagen pasó de `postgres:17` (Debian bookworm, glibc 2.36) a
+`postgres:17-trixie` (glibc 2.41), con los datos creados en la anterior.
+PostgreSQL avisa con «collation version mismatch»: los índices de texto se
+ordenaron con otra versión de glibc. El 18/11/2026 `energia` ya estaba en
+2.41 y `amcheck` dio por buenos sus 40 índices B-tree; `postgres` y
+`template1` estaban en 2.36 y se corrigieron sin parar servicios:
+
+```sh
+docker compose exec db psql -U energia -d energia -c "SELECT datname, datcollversion, pg_database_collation_actual_version(oid) AS actual FROM pg_database WHERE datallowconn"
+docker compose exec db psql -U energia -d energia -c "CREATE EXTENSION IF NOT EXISTS amcheck" -c "SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_am a ON a.oid = c.relam, LATERAL bt_index_check(c.oid, true) WHERE a.amname = 'btree' AND c.relnamespace = 'public'::regnamespace" -c "DROP EXTENSION amcheck"
+docker compose exec db psql -U energia -d postgres -c "REINDEX DATABASE postgres" -c "ALTER DATABASE postgres REFRESH COLLATION VERSION"
+docker compose exec db psql -U energia -d template1 -c "REINDEX DATABASE template1" -c "ALTER DATABASE template1 REFRESH COLLATION VERSION"
+```
+
+Si alguna vez es `energia` la desfasada: parar `collector`, `muestreo` y
+`formulario`, `REINDEX DATABASE energia` y `ALTER DATABASE energia REFRESH
+COLLATION VERSION` (conectado a `energia`), y `docker compose up -d`. Antes
+de cambiar la imagen de PostgreSQL a otra versión de Debian, revisar esto.
