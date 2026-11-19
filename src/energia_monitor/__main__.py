@@ -1,5 +1,5 @@
 """Punto de entrada: python -m energia_monitor [ejecutar | migrar | recargar | refrescar | parametro | esios | cargador | bateria
-| planificador].
+| planificador | vigilancia].
 
 - ejecutar (por defecto): migraciones, descarga de los días que falten desde
   CARGA_INICIAL_DESDE hasta mañana y actualización diaria planificada.
@@ -47,6 +47,9 @@
 - planificador modo activo|sombra|pausa | tareas | reconciliar --en-seco |
   limpiar --confirmar | guardiana --id N --confirmar: paso 3c, hablan con el
   cargador (contenedor muestreo, con VIARIS_URL).
+- vigilancia [--estado FICHERO] [--prueba]: paso 3d, avisos de correo (servicio
+  vigilancia del compose, lo lanza deploy/vigilancia.sh desde DSM). Si cambia
+  algo, imprime el resumen y devuelve 1; si no, 0 sin salida.
 
 recargar, esios recargar, esios estimar y parametro registrar (de contrato)
 refrescan mv_precio_final al terminar.
@@ -61,6 +64,7 @@ import sys
 import threading
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import psycopg
 
@@ -169,6 +173,11 @@ def _parser() -> argparse.ArgumentParser:
     guardiana = sub_plan.add_parser("guardiana", help="traslada la tarea guardiana a otro id libre")
     guardiana.add_argument("--id", type=int, required=True)
     guardiana.add_argument("--confirmar", action="store_true", required=True)
+
+    vigilancia = sub.add_parser("vigilancia", help="avisos de correo: imprime los cambios y devuelve 1 (paso 3d)")
+    vigilancia.add_argument("--estado", type=Path, help="fichero de estado (por defecto VIGILANCIA_ESTADO o "
+                            "/estado/vigilancia.json)")
+    vigilancia.add_argument("--prueba", action="store_true", help="mensaje de prueba y código 1, sin tocar el estado")
     return parser
 
 
@@ -440,8 +449,14 @@ def _stop_por_senales() -> threading.Event:
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _parser().parse_args(argv)
+    if args.orden == "vigilancia":
+        # Su salida es el correo (DSM la envía si devuelve 1): sin líneas de log ni configuración del colector.
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
+        from energia_monitor import vigilancia
+
+        return vigilancia.main(args.estado, args.prueba)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     config = Config.desde_entorno()
     orden = args.orden or "ejecutar"
     log.info("energia-monitor %s: %s (fuente %s)", __version__, orden, config.price_source)

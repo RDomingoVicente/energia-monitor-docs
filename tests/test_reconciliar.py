@@ -19,6 +19,7 @@ from energia_monitor.plan_carga.reconciliar import (
     anotar_choques,
     Operacion,
     Propia,
+    cubierto,
     cuerpo,
     deseadas,
     ocurrencias,
@@ -293,3 +294,48 @@ def test_propiedades_en_el_tiempo(semilla: int) -> None:
         r2 = reconciliar(ahora, modo, 9, c.lectura(), list(propias.values()), deseadas_, CONGELAR)
         # Sin cambios entre medias: nada que escribir (salvo terminadas que aún no se podían borrar, ninguna).
         assert r2.operaciones == (), (paso, r2.operaciones)
+
+
+# --- Paso 3d: tarea ajena sobre la franja en curso y carga cubierta ------------------------------------
+
+
+def _con_franja_en_curso() -> tuple[Cargador, dict[int, Propia], list[Deseada]]:
+    """Franja propia 1 del miércoles 18/11 de 14:30 a 15:30 (en curso a las 15:00), ya escrita y confirmada."""
+    c = Cargador(leer())
+    p = Propia(1, "franja", "automatica", date(2026, 11, 18), 870, 60, True)
+    c.aplicar(Operacion("POST", 1, cuerpo(1, p.fecha, p.hora_min, p.duracion, True), "", p))
+    d = deseadas([(local(18, 14, 30), local(18, 15, 30), "automatica")])
+    guardiana = Propia(9, "guardiana", "guardiana", date(2026, 12, 31), 0, 1, True)
+    return c, {1: p, 9: guardiana}, d
+
+
+def test_ajena_activa_que_pisa_la_franja_en_curso_avisa_y_no_se_toca() -> None:
+    c, propias, d = _con_franja_en_curso()
+    c.tareas[6]["active"] = 1
+    c.tareas[6]["initTime"]["timeList"][0].update(hourMin=900, duration=60)  # miércoles 15:00–16:00
+    r = reconciliar(AHORA, "activo", 9, c.lectura(), list(propias.values()), d, CONGELAR)
+    avisos = {a.clave: a for a in r.avisos}
+    assert "ajena_pisa_franja:6" in avisos and avisos["ajena_pisa_franja:6"].nivel == "aviso"
+    assert "tarea 1" in avisos["ajena_pisa_franja:6"].detalle
+    assert all(op.id != 6 for op in r.operaciones)
+
+
+def test_ajena_inactiva_o_que_no_solapa_no_avisa() -> None:
+    c, propias, d = _con_franja_en_curso()
+    r = reconciliar(AHORA, "activo", 9, c.lectura(), list(propias.values()), d, CONGELAR)
+    assert not any(a.clave.startswith("ajena_pisa_franja") for a in r.avisos)  # la 6 está inactiva
+    c.tareas[6]["active"] = 1  # miércoles 00:00–08:00: ya pasó
+    r = reconciliar(AHORA, "activo", 9, c.lectura(), list(propias.values()), d, CONGELAR)
+    assert not any(a.clave.startswith("ajena_pisa_franja") for a in r.avisos)
+
+
+def test_cubierto_por_cualquier_tarea_activa() -> None:
+    c, _, _ = _con_franja_en_curso()
+    lectura = c.lectura()
+    assert cubierto(lectura, AHORA)  # la franja propia 1
+    assert not cubierto(lectura, local(18, 16))  # solo la guardiana activa (31/12)
+    assert cubierto(lectura, datetime(2026, 12, 31, 0, 0, 30, tzinfo=MADRID))  # la guardiana
+    c.tareas[1]["active"] = 0
+    assert not cubierto(c.lectura(), AHORA)
+    c.tareas[6]["active"] = 1  # semanal del miércoles 00:00–08:00
+    assert cubierto(c.lectura(), local(18, 3))

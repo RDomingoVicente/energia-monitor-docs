@@ -38,7 +38,7 @@ GRUPOS = {
     6: ["potencia_carga_inicial_kw", "ventana_potencia_dias", "franja_min_min", "max_tareas_sistema",
         "horizonte_provisional_h", "horizonte_plan_h", "hora_publicacion_precios", "id_tarea_guardiana",
         "congelar_franja_min"],  # 0022
-    7: ["aviso_sin_lectura_dias", "hueco_muestreo_aviso_s", "aviso_planificador_min"],
+    7: ["aviso_sin_lectura_dias", "hueco_muestreo_aviso_s", "aviso_planificador_min", "aviso_precios_min"],  # 0023
 }
 
 OBJETOS_0020 = ["bateria_parametro_grupo", "planificador_modo", "planificador_config", "plan_calculo", "plan_cuarto",

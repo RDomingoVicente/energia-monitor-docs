@@ -110,6 +110,27 @@ services:
       retries: 3
       start_period: 20s
 
+  # Vigilancia de avisos por correo (paso 3d): no arranca con `up` (perfil). La lanza
+  # deploy/vigilancia.sh desde el Programador de tareas de DSM cada 15 minutos
+  # (deploy/README.md). Rol de solo lectura grafana_ro; estado en ./vigilancia
+  # (dueño 10001). Sin depends_on: si la base no responde, eso es el aviso.
+  vigilancia:
+    image: ${HARBOR_REGISTRY}/${HARBOR_PROJECT:-energia}/collector:${COLLECTOR_TAG:-latest}
+    profiles: ["vigilancia"]
+    command: ["python", "-m", "energia_monitor", "vigilancia"]
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-energia}
+      PGUSER: grafana_ro
+      PGPASSWORD: ${GRAFANA_DB_PASSWORD:-}
+      VIGILANCIA_ESTADO: /estado/vigilancia.json
+      # FORMULARIO_HOST ya lleva el puerto (nombre:8421).
+      VIGILANCIA_URL_BASE: https://${FORMULARIO_HOST:-}
+      TZ: Europe/Madrid
+    volumes:
+      - ./vigilancia:/estado
+
 networks:
   default:
     # Nombre fijo: el stack de Grafana se une a ella como red externa.

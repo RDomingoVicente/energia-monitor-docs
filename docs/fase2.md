@@ -615,7 +615,7 @@ Entrega (E3.11):
 | 3a | Modelo, disponibilidad, algoritmo, modo sombra, CLI (`planificador plan`, `planificador simular` sobre un día pasado), tests | No |
 | 3b | Pantalla Plan de carga y panel de Inicio (sombra: solo lectura) | No |
 | 3c | Escritura y reconciliación, franjas manuales, Detener, modo activo, auditoría | Sí |
-| 3d | Aviso por correo, avisos nuevos, Grafana | — |
+| 3d | Aviso por correo y avisos nuevos (v0.8.0); Grafana, pendiente | — |
 
 Entre 3b y la activación, en lugar de una semana en sombra (cambio del
 18/11/2026): una simulación en seco de 3c en el NAS. La v0.7.0 en modo sombra
@@ -681,6 +681,11 @@ antes.
 4. Paso 3c (v0.7.0, migración 0022): ver «Implementación del paso 3c».
    Pendiente: simulación en seco en el NAS, pruebas de escritura a mano,
    tareas 5 y 6 desactivadas en la app y activación.
+5. Paso 3d, reducido (v0.8.0, migración 0023; plan aprobado el 19/11/2026):
+   avisos que faltaban de E3.10 y aviso por correo desde el NAS (E3.7), antes
+   de activar la escritura. Ver «Paso 3d». **Grafana (franjas como bandas
+   sobre los precios y panel de ahorro) queda pendiente**, para después de la
+   activación.
 
 ### Objetivo
 
@@ -914,7 +919,8 @@ Control desde el formulario:
   `aviso_planificador_min` sin completar un ciclo. Lo comprueba un script en el
   NAS, fuera del contenedor (como la renovación de certificados), leyendo la
   hora del último ciclo en la base de datos. También aparece como aviso en el
-  formulario.
+  formulario. Hecho en el paso 3d (`deploy/vigilancia.sh`), junto con el
+  resto de avisos marcados con correo en `aviso_tipo`.
 
 **E3.8 Modo sombra y medida del ahorro.**
 
@@ -1038,7 +1044,7 @@ código.
   precios del día siguiente sin publicar a la hora esperada; planificador
   parado.
 - **Grafana:** franjas como bandas sobre la gráfica de precios; panel de
-  ahorro.
+  ahorro. **Pendiente** (fuera del paso 3d reducido, 19/11/2026).
 - **Parámetros** (pantalla existente, se rehace): un panel por grupo (E3.9).
   Escritorio: índice lateral de grupos. Móvil: `<details>` por grupo, abiertos
   «Coche y batería» y «Estrategia de carga». El grupo 6 va plegado con la
@@ -1233,6 +1239,70 @@ Plan aceptado con estas decisiones del usuario:
   cargador sin respuesta, ajenas respetadas, NOTIFY, cola y permisos de
   `formulario_rw` (solo inserta en `plan_accion`). Sin probar contra el
   cargador real.
+
+### Paso 3d (v0.8.0, 19/11/2026)
+
+Plan aprobado el 19/11/2026, reducido: avisos y correo antes de activar la
+escritura el 25/11; Grafana, después. Decisiones del usuario:
+
+- **Cargador distinto del plan** (no estaba definido): el coche carga (estado
+  5 o 6 y potencia del EVSE > 0) sin ninguna tarea activa del programador que
+  cubra ese momento durante más de un ciclo de muestreo (dos muestras
+  seguidas). ERROR con correo **en todos los modos, también en sombra**: la
+  guardiana protege siempre y es el riesgo de cargar caro. Lo detecta el
+  muestreo con la última lectura del programador; si no lo cubre y esa
+  lectura es anterior a la racha, vuelve a leer (GET) una vez, para no
+  avisar por una tarea recién creada en la app. Sin lectura, no decide.
+- **El plan no cubre una salida**: solo si el último cálculo tenía el coche
+  enchufado (con el coche fuera no hay ventana segura y se planifica al
+  volver); en modo prudente, solo la próxima salida.
+- **Correo**: todos los ERROR (también guardiana ocupada, guardiana en otro
+  id y tarea caducada), escritura fallida, el plan no cubre una salida,
+  cargador no accesible y base de datos no accesible. Columna `correo` de
+  `aviso_tipo`.
+- **`aviso_precios_min`** (30 min, 0–240, grupo 7): margen tras
+  `hora_publicacion_precios` antes de avisar de que faltan los precios de
+  mañana.
+- **Histéresis**: un aviso nuevo se notifica en la primera pasada; se da por
+  resuelto solo si falta en dos pasadas seguidas.
+- **Recordatorio**: un ERROR activo más de 24 h se recuerda una vez al día
+  («sigue activo desde…»).
+- La lógica de la vigilancia va en Python dentro de la imagen y
+  `deploy/vigilancia.sh` es un envoltorio (DSM no tiene `psql` ni psycopg y
+  así se prueba en la CI).
+
+Implementación:
+
+- **Migración 0023**: `aviso_precios_min`; tabla `aviso_tipo` (catálogo:
+  nivel, título, regla, correo y orden; el tipo es la clave sin «:N»);
+  `planificador_aviso.origen` (reconciliar o muestreo: el reconciliador solo
+  reemplaza los suyos); `bateria_avisos_planificador()` con «Planificador
+  parado» (solo si hay fila en `planificador_ciclo`; en SQL, así salta con
+  el muestreo caído), «Precios del día siguiente sin publicar» (cuartos de
+  mañana en `v_plan_precio` frente a 92, 96 o 100) y «El plan no cubre una
+  salida»; `v_aviso` con la columna `correo`.
+- **Reconciliador**: «Tarea ajena que pisa una franja en curso» (tarea activa
+  de la app solapada con la franja propia en curso; nunca se toca) y
+  `cubierto()` para el muestreo.
+- **Muestreo**: `Muestreador.vigilar_carga` tras el planificador en cada
+  ciclo; el aviso queda en `planificador_aviso` con origen `muestreo`.
+- **Formulario**: el catálogo de Avisos sale de `aviso_tipo`, con «correo:
+  sí/no».
+- **Vigilancia**: `energia_monitor/vigilancia.py` y CLI `vigilancia
+  [--estado F] [--prueba]`; servicio `vigilancia` del compose (perfil
+  `vigilancia`, rol `grafana_ro`, estado en `./vigilancia`);
+  `deploy/vigilancia.sh` y la tarea de DSM en deploy/README.md. Si la base
+  no responde, el aviso es «Base de datos no accesible» y los anteriores se
+  conservan sin contar ausencias. Si docker no puede ejecutar la vigilancia,
+  el envoltorio avisa una vez y otra al recuperarse. La salida no lleva el
+  mensaje de libpq (host, usuario) ni credenciales.
+- Verificado con tests: avisos en SQL (planificador parado, precios con el
+  cambio de hora, salidas con y sin coche y en modo prudente), catálogo
+  frente a todos los avisos que emite el código, carga sin tarea contra el
+  cargador simulado (nueva lectura, resolución, sin lectura), vigilancia
+  como `grafana_ro` con base sembrada (nuevo, sin cambios, resuelto, base
+  inaccesible), histéresis y recordatorio, y el envoltorio con un docker
+  falso. **Sin probar en el NAS**: la tarea de DSM y el correo real.
 
 ### Fuera de alcance
 

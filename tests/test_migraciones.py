@@ -36,6 +36,7 @@ PUBLICADAS = {
     "0020_planificador.sql": "930e0e80fa0cf980a5ea5ac270c06df060d42c6c58952db3519126eb69b86979",
     "0021_plan_pantalla.sql": "7b5e4c2161af1a0b5d1e86897f82685d57305877921ccc77f1bd76b105b3db42",
     "0022_planificador_escritura.sql": "c2cd16b3760c516585e0316f793ceb220b44bf09984dec36f5d922974d1175a8",
+    "0023_avisos_correo.sql": "d60f6a1facc813c1bc6e39995974fdd14506248e77381c204669c1d711ce50ae",
 }
 
 

@@ -95,6 +95,7 @@ class Aviso:
     titulo: str
     detalle: str
     regla: str
+    desde: datetime | None = None  # None: el instante en que se guarda por primera vez
 
 
 @dataclass(frozen=True)
@@ -168,6 +169,11 @@ def ocurrencias(t: Tarea, desde: datetime, hasta: datetime) -> list[tuple[dateti
                 salida.append((a, b))
         dia += timedelta(days=1)
     return salida
+
+
+def cubierto(lectura: Sequence[Tarea], instante: datetime) -> bool:
+    """Alguna tarea activa del programador (propia, ajena o la guardiana) cubre ese instante."""
+    return any(t.activa and ocurrencias(t, instante, instante + timedelta(seconds=1)) for t in lectura)
 
 
 def reconciliar(ahora: datetime, modo: str, guardiana_id: int, lectura: Sequence[Tarea],
@@ -262,6 +268,17 @@ def reconciliar(ahora: datetime, modo: str, guardiana_id: int, lectura: Sequence
                                 f"La tarea {p.id} no es como se escribió (¿guardada desde la app?): se corrige.",
                                 "tarea propia distinta en la lectura"))
         vivas.append((p, t))
+
+    # --- Tareas ajenas encima de la franja en curso (E3.10): solo se avisa, nunca se tocan --------------
+    for p, _t in vivas:
+        if not p.inicio <= ahora < p.fin:
+            continue
+        for a in lectura:
+            if a.activa and a.id not in registradas and a.id != guardiana_id and ocurrencias(a, ahora, p.fin):
+                avisos.append(Aviso(f"ajena_pisa_franja:{a.id}", "aviso", "Tarea ajena que pisa una franja en curso",
+                                    f"La tarea {a.id} de la app se solapa con la franja en curso (tarea {p.id}, hasta "
+                                    f"las {p.fin.astimezone(MADRID):%H:%M}): no se toca.",
+                                    "tarea activa de la app solapada con la franja propia en curso"))
 
     # --- Qué se queda, qué se cambia ---------------------------------------------------------------
     pendientes_d = [d for d in deseadas_ if d.fin > ahora]

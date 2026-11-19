@@ -79,6 +79,7 @@ PARAMETROS_INICIALES: dict[str, Decimal] = {
     "horizonte_plan_h": Decimal(72),
     "hora_publicacion_precios": Decimal(810),  # minutos desde las 00:00 (13:30)
     "congelar_franja_min": Decimal(30),  # 0022
+    "aviso_precios_min": Decimal(30),  # 0023
 }
 
 

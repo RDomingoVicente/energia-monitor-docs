@@ -624,11 +624,22 @@ class AvisoResuelto:
     fin: datetime
 
 
+@dataclass(frozen=True)
+class TipoAviso:
+    """Fila de aviso_tipo (0023): el catálogo de la pantalla."""
+
+    nivel: str
+    titulo: str
+    regla: str
+    correo: bool
+
+
 @dataclass
 class Avisos:
     ahora: datetime
     activos: list[AvisoActivo]
     resueltos: list[AvisoResuelto]
+    tipos: list[TipoAviso] = field(default_factory=list)
 
 
 def avisos(conn: psycopg.Connection, ahora: datetime) -> Avisos:
@@ -640,4 +651,5 @@ def avisos(conn: psycopg.Connection, ahora: datetime) -> Avisos:
     resueltos = [AvisoResuelto(*f) for f in conn.execute(
         "SELECT titulo, detalle, inicio, fin FROM aviso_historial WHERE fin IS NOT NULL AND fin <= %(a)s"
         " AND fin > %(a)s - interval '7 days' ORDER BY fin DESC", {"a": ahora})]
-    return Avisos(ahora, activos, resueltos)
+    tipos = [TipoAviso(*f) for f in conn.execute("SELECT nivel, titulo, regla, correo FROM aviso_tipo ORDER BY orden")]
+    return Avisos(ahora, activos, resueltos, tipos)

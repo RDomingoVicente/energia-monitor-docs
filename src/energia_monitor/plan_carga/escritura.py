@@ -25,6 +25,7 @@ from energia_monitor.plan_carga.reconciliar import (
     Deseada,
     Operacion,
     Propia,
+    cubierto,
     deseadas,
     ocurrencias,
     reconciliar,
@@ -77,6 +78,29 @@ def leer(conn: psycopg.Connection, cliente: ClienteViaris, ahora: datetime) -> l
     return tareas
 
 
+def lectura_con_fecha(conn: psycopg.Connection) -> tuple[datetime, list[Tarea]] | None:
+    """(leida_en, tareas) de la última lectura correcta del programador; None si no la hay o falló."""
+    fila = conn.execute("SELECT leida_en FROM planificador_lectura WHERE ok").fetchone()
+    tareas = ultima_lectura(conn)
+    return None if fila is None or tareas is None else (fila[0], tareas)
+
+
+def carga_cubierta(conn: psycopg.Connection, cliente: ClienteViaris, ahora: datetime,
+                   desde: datetime | None) -> bool | None:
+    """¿Alguna tarea activa cubre la carga de ahora? (aviso «Cargador distinto del plan», 0023).
+
+    Con la última lectura del programador; si no la cubre y esa lectura es anterior a `desde` (inicio de la
+    racha sin tarea, o ahora), se vuelve a leer (GET) para no avisar por una tarea creada después. None: sin
+    lectura, no se sabe."""
+    lc = lectura_con_fecha(conn)
+    if lc is not None and cubierto(lc[1], ahora):
+        return True
+    if lc is None or lc[0] < (desde or ahora):
+        tareas = leer(conn, cliente, ahora)
+        return None if tareas is None else cubierto(tareas, ahora)
+    return False
+
+
 def ultima_lectura(conn: psycopg.Connection) -> list[Tarea] | None:
     fila = conn.execute("SELECT ok, tareas FROM planificador_lectura").fetchone()
     if fila is None or not fila[0]:
@@ -114,15 +138,19 @@ def deseadas_actuales(conn: psycopg.Connection, ahora: datetime) -> list[Deseada
     return deseadas(franjas)
 
 
-def guardar_avisos(conn: psycopg.Connection, ahora: datetime, avisos: Sequence[Aviso]) -> None:
-    """planificador_aviso = los avisos de este ciclo (conserva el «desde» de los que siguen)."""
+def guardar_avisos(conn: psycopg.Connection, ahora: datetime, avisos: Sequence[Aviso],
+                   origen: str = "reconciliar") -> None:
+    """Los avisos de este origen en planificador_aviso = los de este ciclo (conserva el «desde» de los que siguen).
+    Origen reconciliar: los del reconciliador; muestreo: «Cargador distinto del plan» (0023)."""
     with conn.transaction():
-        conn.execute("DELETE FROM planificador_aviso WHERE NOT (clave = ANY(%s))", ([a.clave for a in avisos],))
+        conn.execute("DELETE FROM planificador_aviso WHERE origen = %s AND NOT (clave = ANY(%s))",
+                     (origen, [a.clave for a in avisos]))
         for a in avisos:
-            conn.execute("INSERT INTO planificador_aviso (clave, nivel, titulo, detalle, desde, regla)"
-                         " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (clave) DO UPDATE SET nivel = EXCLUDED.nivel,"
-                         " titulo = EXCLUDED.titulo, detalle = EXCLUDED.detalle, regla = EXCLUDED.regla",
-                         (a.clave, a.nivel, a.titulo, a.detalle, ahora, a.regla))
+            conn.execute("INSERT INTO planificador_aviso (clave, nivel, titulo, detalle, desde, regla, origen)"
+                         " VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (clave) DO UPDATE SET nivel = EXCLUDED.nivel,"
+                         " titulo = EXCLUDED.titulo, detalle = EXCLUDED.detalle, regla = EXCLUDED.regla,"
+                         " origen = EXCLUDED.origen",
+                         (a.clave, a.nivel, a.titulo, a.detalle, a.desde or ahora, a.regla, origen))
 
 
 def _registrar(conn: psycopg.Connection, p: Propia, estado: str, error: str | None = None) -> None:

@@ -38,7 +38,10 @@ PANTALLAS = (
                       "«¿Cargaste fuera de casa?»."),
     ("Parámetros", "Valores del modelo por grupos, con su origen y vigencia. Sugerencias de calibración que tú decides "
                    "aplicar."),
-    ("Avisos", "Avisos activos y resueltos en los últimos 7 días. Se generan solos y desaparecen al resolverse la causa."),
+    ("Avisos", "Avisos activos y resueltos en los últimos 7 días. Se generan solos y desaparecen al resolverse la causa. "
+               "Los de «correo: sí» en «Tipos de aviso» (todos los ERROR, escritura fallida y el plan que no cubre "
+               "una salida) llegan también por correo desde el NAS, al aparecer y al resolverse, y los ERROR que "
+               "siguen activos se recuerdan una vez al día."),
 )
 
 

@@ -305,7 +305,16 @@ def avisos(_conn: object, _ahora: object) -> d.Avisos:
     ]
     resueltos = [d.AvisoResuelto("Hueco de muestreo", "42 min sin muestras del cargador",
                                  AHORA - timedelta(days=4, minutes=42), AHORA - timedelta(days=4))]
-    return d.Avisos(AHORA, activos, resueltos)
+    tipos = [  # una muestra del catálogo de aviso_tipo (0023)
+        d.TipoAviso("error", "Cargador no accesible", "última muestra más antigua que hueco_muestreo_aviso_s", True),
+        d.TipoAviso("error", "Planificador parado", "último ciclo correcto más antiguo que aviso_planificador_min",
+                    True),
+        d.TipoAviso("aviso", "El plan no cubre una salida",
+                    "con el coche enchufado, el plan no llega al objetivo de una salida ni saltando el umbral", True),
+        d.TipoAviso("aviso", "Sin lecturas", "nivel ESTIMADO y más de aviso_sin_lectura_dias sin lecturas", False),
+        d.TipoAviso("info", "Calibración sugerida", "E2.6", False),
+    ]
+    return d.Avisos(AHORA, activos, resueltos, tipos)
 
 
 def instalar(monkeypatch: Any) -> None:

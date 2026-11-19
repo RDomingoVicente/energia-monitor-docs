@@ -11,3 +11,5 @@ certs/
 tests/ui/.certs/
 # Capturas de tests/ui/capturas.py.
 /capturas/
+# Estado de la vigilancia de avisos (deploy/README.md).
+/deploy/vigilancia/

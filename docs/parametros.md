@@ -257,6 +257,9 @@ reglas que los de la batería (CLI con `--ambito bateria`). Migración 0020:
 - `congelar_franja_min` (0022, grupo 6, 30 min, rango 0–120): una franja
   propia que empieza en menos de ese tiempo ya no se mueve ni se borra; se
   deja como está en el cargador y el plan cuenta su energía.
+- `aviso_precios_min` (0023, grupo 7, 30 min, rango 0–240): margen tras
+  `hora_publicacion_precios` antes del aviso «Precios del día siguiente sin
+  publicar» (el colector descarga a la misma hora de la publicación).
 - `carga_oportunista` va como 0/1. `hora_publicacion_precios` (unidad
   «hora») se guarda en minutos desde las 00:00 (810 = 13:30, rango
   720–1080), pero en la página y en el CLI se escribe y se muestra HH:MM:

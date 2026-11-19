@@ -13,6 +13,8 @@ FROM base AS test
 COPY tests ./tests
 # Los tests validan el dashboard; la imagen de ejecución no lo incluye.
 COPY grafana ./grafana
+# Envoltorio de la vigilancia (paso 3d): se prueba con un docker falso.
+COPY deploy/vigilancia.sh ./deploy/vigilancia.sh
 RUN pip install --no-cache-dir pytest && pytest -q
 
 # Etapa de ejecución (por defecto)

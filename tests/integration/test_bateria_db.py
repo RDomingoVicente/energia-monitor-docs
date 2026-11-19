@@ -667,7 +667,8 @@ def test_claves_con_textos_y_rango(conn: psycopg.Connection, limpio: None) -> No
     filas = conn.execute(
         "SELECT k.clave, k.nombre, k.descripcion, k.efecto, k.minimo, k.maximo, p.valor"
         " FROM bateria_parametro_clave k JOIN bateria_parametro p USING (clave) ORDER BY k.clave").fetchall()
-    assert len(filas) == 35  # 15 de la etapa 2, 19 del planificador (0020) y congelar_franja_min (0022)
+    # 15 de la etapa 2, 19 del planificador (0020), congelar_franja_min (0022) y aviso_precios_min (0023)
+    assert len(filas) == 36
     for clave, nombre, descripcion, efecto, minimo, maximo, valor in filas:
         assert nombre and descripcion and efecto, clave
         assert minimo <= valor <= maximo, clave
@@ -1011,3 +1012,4 @@ def test_eventos_de_carga_con_energia_medida(conn: psycopg.Connection, limpio: N
     conn.execute("SELECT recalcular_bateria(%s)", (ahora,))
     assert conn.execute("SELECT valor, medido_kwh FROM v_bateria_evento_reciente WHERE tipo = 'carga_externa'"
                         ).fetchone() == (None, None)
+

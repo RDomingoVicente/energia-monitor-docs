@@ -22,6 +22,7 @@ import psycopg
 from energia_monitor import bateria_servicio, db
 from energia_monitor.plan_carga import acciones as plan_acciones
 from energia_monitor.plan_carga import escritura as plan_escritura
+from energia_monitor.plan_carga.reconciliar import Aviso
 from energia_monitor.plan_carga.servicio import Ciclo as CicloPlan
 from energia_monitor.tiempo import MADRID, limites_dia_utc
 from energia_monitor.viaris import CONECTOR, ClienteViaris, ErrorCargador, EstadoConector, Modulador, Sesion
@@ -29,6 +30,8 @@ from energia_monitor.viaris import CONECTOR, ClienteViaris, ErrorCargador, Estad
 log = logging.getLogger(__name__)
 
 INTERVALO_S = 60
+# Estados del conector con carga (viaris-api.md: 5 y 6); además, potencia del EVSE > 0.
+ESTADOS_CARGA = (5, 6)
 # Más de este hueco entre muestras no se rellena: la muestra lleva intervalo NULL.
 INTERVALO_MAX_S = 180
 INTERVALO_HISTORICO = timedelta(minutes=15)
@@ -199,6 +202,9 @@ class Muestreador:
         self._aviso_modulador = _AvisoFallos("modulador")
         self._aviso_evsm = _AvisoFallos("estado del conector")
         self._aviso_historico = _AvisoFallos("histórico", repetir_cada=4)
+        # «Cargador distinto del plan» (0023): inicio y número de muestras de la racha cargando sin tarea.
+        self._sin_tarea_desde: datetime | None = None
+        self._sin_tarea_n = 0
 
     def ciclo(self, conn: psycopg.Connection) -> None:
         """Una muestra y, si toca, el histórico. Los fallos del cargador no se propagan."""
@@ -209,6 +215,7 @@ class Muestreador:
             self._aviso_evsm.exito()
         except ErrorCargador as e:
             self._aviso_evsm.fallo(e)
+        modulador: Modulador | None = None
         try:
             modulador = self.cliente.modulador()
             self._aviso_modulador.exito()
@@ -229,6 +236,33 @@ class Muestreador:
         bateria_servicio.actualizar_avisos_sin_fallar(conn)
         if self.plan is not None:
             self.planificar(conn, instante, evento)
+            if estado is not None and modulador is not None:
+                self.vigilar_carga(conn, instante, estado.estado in ESTADOS_CARGA and modulador.evse_w > 0,
+                                   modulador.evse_w)
+
+    def vigilar_carga(self, conn: psycopg.Connection, instante: datetime, cargando: bool, potencia_w: Decimal) -> None:
+        """«Cargador distinto del plan» (0023, ERROR en todos los modos): el coche carga sin ninguna tarea activa
+        que cubra ese momento durante más de un ciclo de muestreo (dos muestras seguidas)."""
+        try:
+            cubierta = True if not cargando else plan_escritura.carga_cubierta(conn, self.cliente, instante,
+                                                                              self._sin_tarea_desde)
+            if cubierta is None:
+                return  # sin lectura del programador: no se sabe; se queda como estaba
+            if cubierta:
+                self._sin_tarea_desde, self._sin_tarea_n = None, 0
+                plan_escritura.guardar_avisos(conn, instante, [], origen="muestreo")
+                return
+            self._sin_tarea_desde = self._sin_tarea_desde or instante
+            self._sin_tarea_n += 1
+            if self._sin_tarea_n >= 2:
+                desde = self._sin_tarea_desde
+                plan_escritura.guardar_avisos(conn, instante, [Aviso(
+                    "carga_sin_tarea", "error", "Cargador distinto del plan",
+                    f"El coche carga desde las {desde.astimezone(MADRID):%H:%M} ({potencia_w:.0f} W) sin ninguna "
+                    "tarea activa del programador que lo cubra.",
+                    "carga sin tarea activa durante más de un ciclo de muestreo", desde)], origen="muestreo")
+        except Exception:  # noqa: BLE001
+            log.exception("fallo al comprobar la carga frente al programador")
 
     def planificar(self, conn: psycopg.Connection, instante: datetime, evento: str | None) -> None:
         """Paso 3c: acciones pendientes del formulario, recálculo del plan y, si hay plan nuevo o acciones,

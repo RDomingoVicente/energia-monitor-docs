@@ -11,14 +11,6 @@ ACCIONES = {"lectura": ("/#lectura", "Anotar lectura →"), "historial": ("/hist
             "excepciones": ("/excepciones", "Revisar excepciones →"),
             "parametros": ("/parametros?clave=factor_bateria#cambiar", "Revisar en Parámetros →"),
             "plan": ("/plan", "Revisar en Plan de carga →")}
-CATALOGO = (
-    ("error", "Cargador no accesible · Base de datos no accesible",
-     "Inmediato. Se resuelve solo al recuperarse (la página no consulta el cargador: mira la última muestra)."),
-    ("aviso", "Sin lecturas · Hueco de muestreo · Intervalo incoherente · ¿Cargaste fuera de casa? · Objetivo por "
-              "encima del tope · Carga completa dudosa",
-     "Umbrales en Parámetros: aviso_sin_lectura_dias, hueco_muestreo_aviso_s, umbral_carga_externa_kwh, tope_pct."),
-    ("info", "Calibración sugerida (eficiencia de carga)", "Desaparece al registrar el valor sugerido."),
-)
 
 
 def _tag(nivel: str) -> Html:
@@ -43,11 +35,16 @@ def pantalla(d: Avisos) -> Html:
     resueltos = (h('<div class="tabla-desplazable"><table><thead><tr><th>Inicio</th><th>Tipo</th><th>Detalle</th>'
                    '<th class="r">Estado</th></tr></thead><tbody>{}</tbody></table></div>', unir(filas)) if filas
                  else Html('<p class="vacio">Ninguno en los últimos 7 días.</p>'))
+    # Catálogo: aviso_tipo (0023), con la regla y si llega por correo (vigilancia del NAS).
     catalogo = unir(h('<div class="it-aviso"><div><p class="titulo-aviso">{}<span>{}</span></p><p class="k texto">{}</p>'
-                      '</div></div>', _tag(nivel), titulo, texto) for nivel, titulo, texto in CATALOGO)
+                      '<p class="k m">correo: {}</p></div></div>', _tag(t.nivel), t.titulo, t.regla,
+                      "sí" if t.correo else "no") for t in d.tipos)
+    if not d.tipos:
+        catalogo = Html('<p class="vacio">Sin catálogo.</p>')
     return h('<div class="dos-columnas"><div class="col"><section class="pn"><div class="ph"><h2 class="pt">Activos · {}'
              '</h2><span class="k solo-escritorio">se generan solos y desaparecen al resolverse la causa</span></div>{}'
              '</section><p class="k solo-movil">Se generan solos a partir de los datos y desaparecen cuando se resuelve '
              'la causa.</p><section class="pn"><div class="ph"><h2 class="pt">Resueltos · últimos 7 días</h2></div>{}'
              '</section></div><section class="pn solo-escritorio"><div class="ph"><h2 class="pt">Tipos de aviso</h2>'
-             '</div>{}</section></div>', n, lista, resueltos, catalogo)
+             '</div><p class="k">Los de «correo: sí» llegan también por correo desde el NAS (vigilancia cada 15 minutos).</p>{}'
+             '</section></div>', n, lista, resueltos, catalogo)

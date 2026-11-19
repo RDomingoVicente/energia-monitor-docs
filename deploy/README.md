@@ -150,6 +150,73 @@ Comprobación: desde un dispositivo no permitido,
 sección no está verificada en tu tailnet: revisa la política con la vista
 previa de la consola antes de guardarla.
 
+## Avisos por correo (vigilancia, paso 3d)
+
+`vigilancia.sh` comprueba cada 15 minutos los avisos marcados con correo en el
+catálogo (pantalla Avisos → «Tipos de aviso»; tabla `aviso_tipo`): todos los
+ERROR (planificador parado, guardiana ausente o inactiva, ninguna tarea activa,
+cargador distinto del plan, cargador no accesible...), escritura fallida, el
+plan no cubre una salida y base de datos no accesible. Corre fuera de los
+contenedores del servicio, así que avisa también con el muestreo o la base
+caídos.
+
+- Solo escribe algo, y termina con 1, cuando cambia algo: un aviso nuevo (en la
+  primera pasada), uno resuelto (cuando falta en dos pasadas seguidas) o, una
+  vez al día, un ERROR que sigue activo tras 24 h. Si nada cambia, termina con
+  0 sin salida.
+- El correo lo manda DSM con su SMTP («solo si el script termina de forma
+  anómala»): no hay credenciales nuevas. Lleva el aviso, desde cuándo, el
+  detalle y el enlace a la pantalla (`https://FORMULARIO_HOST/...`), nada más.
+- La lógica está en la imagen (servicio `vigilancia` del compose, con el perfil
+  `vigilancia`: `docker compose up` no lo arranca). Usa el rol de solo lectura
+  `grafana_ro` (`GRAFANA_DB_PASSWORD` del `.env`, la misma que Grafana).
+- El estado va en `vigilancia/vigilancia.json`. Si docker no puede ejecutar la
+  vigilancia, el script avisa una vez (`vigilancia/docker-fallo`) y otra cuando
+  vuelve a funcionar.
+
+Instalación, como root en el NAS, desde /volume1/docker/energia-monitor:
+
+1. Copiar `deploy/vigilancia.sh` junto al `docker-compose.yml` y crear el
+   directorio del estado, del usuario de la imagen:
+
+   ```sh
+   chmod 755 vigilancia.sh
+   mkdir -p vigilancia && chown 10001:10001 vigilancia && chmod 750 vigilancia
+   ```
+
+2. Comprobar a mano (con la versión con la migración 0023 ya desplegada):
+
+   ```sh
+   sh vigilancia.sh --prueba; echo "código $?"   # mensaje de prueba y código 1
+   sh vigilancia.sh; echo "código $?"            # 1 con los avisos activos la primera vez
+   sh vigilancia.sh; echo "código $?"            # 0 sin salida
+   ```
+
+3. Panel de control → Programador de tareas → Crear → Tarea programada →
+   Script definido por el usuario:
+   - General: nombre «energia-monitor vigilancia», usuario **root** (docker lo
+     exige).
+   - Programar: diariamente, cada 15 minutos, de 00:00 a 23:45.
+   - Configuración de tareas: marcar «Enviar detalles de ejecución por correo
+     electrónico» con tu dirección y «Solo enviar detalles de ejecución cuando
+     el script termine de forma anómala». Script:
+
+     ```sh
+     sh /volume1/docker/energia-monitor/vigilancia.sh
+     ```
+
+   Requiere las notificaciones por correo de DSM configuradas (Panel de control
+   → Notificación → Correo electrónico).
+
+4. Probar el correo: cambiar temporalmente el script de la tarea a
+   `sh /volume1/docker/energia-monitor/vigilancia.sh --prueba`, «Ejecutar», y
+   volver a dejarlo como estaba. Debe llegar el mensaje «Prueba: si te llega
+   este correo...».
+
+Si cambias `FORMULARIO_HOST` o `GRAFANA_DB_PASSWORD` en el `.env`, la vigilancia
+lo lee en la siguiente pasada (cada `docker compose run` crea el contenedor de
+nuevo).
+
 ## Actualizar a una versión con migraciones
 
 Probado con v0.6.0 (migración 0020) el 18/11/2026. Desde

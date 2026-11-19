@@ -384,27 +384,36 @@ Maqueta 07.
   dispara y botón a la pantalla donde se resuelve. Sin marcar como leído:
   desaparecen cuando cesa la causa.
 - Resueltos de los últimos 7 días.
-- Catálogo (escritorio):
+- Catálogo (escritorio), generado desde la tabla `aviso_tipo` (migración
+  0023, paso 3d). «Correo»: la vigilancia del NAS (deploy/vigilancia.sh) lo
+  envía al aparecer, al resolverse (tras faltar en dos pasadas seguidas) y,
+  si es un ERROR que sigue activo tras 24 h, una vez al día. Todos los ERROR,
+  más escritura fallida y el plan que no cubre una salida. Los avisos del
+  planificador llevan la acción «Plan de carga».
 
-| Nivel | Aviso | Regla | Acción |
-|---|---|---|---|
-| ERROR | Cargador no accesible | última muestra más antigua que `hueco_muestreo_aviso_s` (la página no consulta el cargador) | — |
-| ERROR | Base de datos no accesible | (página de error 503) | — |
-| AVISO | Sin lecturas | `estimado` y más de `aviso_sin_lectura_dias` | Anotar lectura |
-| AVISO | Hueco de muestreo | hueco > `hueco_muestreo_aviso_s` | — |
-| AVISO | Intervalo incoherente | E2.5 | Historial |
-| AVISO | ¿Cargaste fuera de casa? | residuo positivo > `umbral_carga_externa_kwh` en el intervalo que termina en la última lectura | Carga externa |
-| AVISO | Objetivo por encima del tope | objetivo > `tope_pct` | Excepciones |
-| AVISO | Carga completa dudosa | sesión terminada por el coche (evsm) sin muestra en los 180 s siguientes o con un estado que no es 1, 2, 4 ni 8, con el muestreo ya en marcha (las anteriores a la primera muestra quedan como `sin_muestreo`, sin aviso); solo las posteriores al último valor absoluto (E2.3) | Historial |
-| INFO | Calibración sugerida | E2.6 | Parámetros |
-
-- Avisos de la etapa 3 (E3.10; se implementan en 3c y 3d, con el mismo
-  formato y acción «Plan de carga»): ERROR guardiana ausente o inactiva;
-  ERROR ninguna tarea activa en el cargador; ERROR planificador parado (más de
-  `aviso_planificador_min`); AVISO escritura fallida; AVISO cargador distinto
-  del plan; AVISO tarea propia modificada fuera del sistema; AVISO tarea ajena
-  que pisa una franja en curso; AVISO el plan no cubre una salida; AVISO
-  precios del día siguiente sin publicar (pasada `hora_publicacion_precios`).
+| Nivel | Aviso | Regla | Acción | Correo |
+|---|---|---|---|---|
+| ERROR | Cargador no accesible | última muestra más antigua que `hueco_muestreo_aviso_s` (la página no consulta el cargador) | — | sí |
+| ERROR | Base de datos no accesible | (página de error 503; la vigilancia no puede consultarla) | — | sí |
+| ERROR | Planificador parado | último ciclo correcto más antiguo que `aviso_planificador_min` (solo si el planificador ha funcionado alguna vez) | Plan de carga | sí |
+| ERROR | Falta la tarea guardiana / Tarea guardiana inactiva | la guardiana falta o está inactiva en el cargador (se crea o se activa) | Plan de carga | sí |
+| ERROR | Id de la tarea guardiana ocupado / Guardiana en otro id | E3.6 (no se crea encima; se resuelve a mano) | Plan de carga | sí |
+| ERROR | Ninguna tarea activa en el cargador | lectura del programador sin tareas activas | Plan de carga | sí |
+| ERROR | Cargador distinto del plan | el coche carga sin ninguna tarea activa que cubra ese momento durante más de un ciclo de muestreo, en cualquier modo | Plan de carga | sí |
+| ERROR | Tarea propia caducada sin borrar | tarea propia terminada que sigue en el cargador | Plan de carga | sí |
+| AVISO | Escritura fallida en el cargador | escritura o confirmación fallida | Plan de carga | sí |
+| AVISO | El plan no cubre una salida | con el coche enchufado (último cálculo), el plan no llega al objetivo ni saltando el umbral; en modo prudente, solo la próxima salida | Plan de carga | sí |
+| AVISO | Tarea propia modificada fuera del sistema / Tarea guardiana modificada / Tarea propia borrada fuera | E3.6 (se corrige) | Plan de carga | no |
+| AVISO | Tarea ajena que pisa una franja en curso | tarea activa de la app solapada con la franja propia en curso | Plan de carga | no |
+| AVISO | No quedan ids libres / No se pudo leer el programador | E3.6 | Plan de carga | no |
+| AVISO | Precios del día siguiente sin publicar | pasada `hora_publicacion_precios` + `aviso_precios_min`, faltan cuartos de mañana | Plan de carga | no |
+| AVISO | Sin lecturas | `estimado` y más de `aviso_sin_lectura_dias` | Anotar lectura | no |
+| AVISO | Hueco de muestreo | hueco > `hueco_muestreo_aviso_s` | — | no |
+| AVISO | Intervalo incoherente | E2.5 | Historial | no |
+| AVISO | ¿Cargaste fuera de casa? | residuo positivo > `umbral_carga_externa_kwh` en el intervalo que termina en la última lectura | Carga externa | no |
+| AVISO | Objetivo por encima del tope | objetivo > `tope_pct` | Excepciones | no |
+| AVISO | Carga completa dudosa | sesión terminada por el coche (evsm) sin muestra en los 180 s siguientes o con un estado que no es 1, 2, 4 ni 8, con el muestreo ya en marcha (las anteriores a la primera muestra quedan como `sin_muestreo`, sin aviso); solo las posteriores al último valor absoluto (E2.3) | Historial | no |
+| INFO | Calibración sugerida | E2.6 | Parámetros | no |
 
 ### 7.8 Carga externa (`/carga-externa`)
 

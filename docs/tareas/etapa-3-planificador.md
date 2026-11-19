@@ -30,7 +30,9 @@ barata (E3.0). Se entrega en pasos que se revisan uno a uno (E3.11).
    (incluido un POST con un id ocupado) y tareas 5 y 6 desactivadas en la
    app.
    Implementado (v0.7.0, sin desplegar): ver «Paso 3c» abajo.
-6. **3d, avisos**: correo desde el NAS, avisos nuevos y Grafana.
+6. **3d, avisos (v0.8.0)**: reducido, plan aprobado el 19/11/2026: avisos nuevos y correo desde el NAS
+   antes de activar («Paso 3d» abajo y en docs/fase2.md). Grafana (bandas de franjas y panel de
+   ahorro), pendiente para después de la activación.
 
 ## Paso 3a
 
@@ -215,3 +217,36 @@ docs/fase2.md.
 Para volver atrás: `planificador modo sombra` (no borra) o
 `planificador limpiar --confirmar` (borra las propias; el coche no cargará
 hasta que actives tus tareas en la app).
+
+## Paso 3d
+
+Plan, decisiones e implementación: «Paso 3d» en docs/fase2.md.
+
+### Despliegue y comprobación (antes de activar el 25/11)
+
+1. Desplegar v0.8.0 como de costumbre (deploy/README.md, «Actualizar a una
+   versión con migraciones»: copia, `migrar` aplica la 0023, `up -d`).
+2. Instalar la vigilancia (deploy/README.md, «Avisos por correo»): copiar
+   `vigilancia.sh`, crear `vigilancia/` con dueño 10001, probar a mano y crear
+   la tarea de DSM cada 15 minutos. Probar el correo con `--prueba` desde la
+   propia tarea.
+3. Avisos activos y catálogo:
+
+   ```sql
+   SELECT nivel, clave, correo, desde AT TIME ZONE 'Europe/Madrid' AS desde, detalle FROM v_aviso ORDER BY nivel, clave;
+   SELECT tipo, nivel, correo FROM aviso_tipo ORDER BY orden;
+   ```
+
+   En sombra, con la 9 activa como guardiana, no debe salir ningún ERROR.
+4. Comprobar el correo de verdad con un aviso real: `docker compose stop
+   muestreo` durante algo más de `aviso_planificador_min` (60 min) da
+   «Planificador parado» y «Cargador no accesible» en la pasada siguiente;
+   `docker compose start muestreo` y, dos pasadas después (unos 30 min), el
+   correo de «Resueltos». Hacerlo de día y sin el coche cargando.
+5. La primera noche con el coche cargando por una tarea activa (de la app, o
+   del planificador ya activo), comprobar que no aparece «Cargador distinto
+   del plan».
+
+Pendiente después de activar: Grafana (franjas como bandas sobre la gráfica
+de precios y panel de ahorro).
+

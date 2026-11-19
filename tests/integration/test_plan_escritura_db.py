@@ -348,3 +348,61 @@ def test_cli_tareas_en_seco_limpiar_y_guardiana(conn: psycopg.Connection, limpio
                  " WHERE clave = 'id_tarea_guardiana' AND lower(vigencia) = (SELECT max(lower(vigencia))"
                  " FROM bateria_parametro WHERE clave = 'id_tarea_guardiana')")
     assert conn.execute("SELECT bateria_param('id_tarea_guardiana', %s)", (AHORA,)).fetchone() == (9,)
+
+
+# --- Paso 3d: «Cargador distinto del plan» (muestreo) ---------------------------------------------------
+
+
+def _carga_sin_tarea(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
+    return conn.execute("SELECT nivel, correo, desde, detalle FROM v_aviso WHERE clave = 'carga_sin_tarea'").fetchall()
+
+
+def test_carga_sin_tarea_activa_avisa_tras_dos_muestras(conn: psycopg.Connection, limpio: None,
+                                                        cargador: CargadorHTTP) -> None:
+    from decimal import Decimal
+
+    from energia_monitor.muestreo import Muestreador
+
+    m = Muestreador(cliente(cargador))
+    t = local(18, 16)  # miércoles 16:00: solo la guardiana (31/12) activa
+    m.vigilar_carga(conn, t, True, Decimal(4000))
+    assert [p[:2] for p in cargador.peticiones] == [("GET", "/modules/scheduler/elements?level=cfg")]
+    assert _carga_sin_tarea(conn) == []  # una sola muestra
+    m.vigilar_carga(conn, t + timedelta(minutes=1), True, Decimal(4000))
+    assert len(cargador.peticiones) == 1  # la lectura ya es posterior al inicio de la racha
+    [(nivel, correo, desde, detalle)] = _carga_sin_tarea(conn)
+    assert (nivel, correo, desde) == ("error", True, t) and "desde las 16:00 (4000 W)" in detalle
+    # Otro ciclo del reconciliador no lo borra; deja de cargar: se resuelve.
+    escritura.guardar_avisos(conn, t + timedelta(minutes=2), [])
+    assert _carga_sin_tarea(conn)
+    m.vigilar_carga(conn, t + timedelta(minutes=2), False, Decimal(0))
+    assert _carga_sin_tarea(conn) == []
+
+
+def test_carga_con_tarea_creada_despues_de_la_lectura_no_avisa(conn: psycopg.Connection, limpio: None,
+                                                                cargador: CargadorHTTP) -> None:
+    from decimal import Decimal
+
+    from energia_monitor.muestreo import Muestreador
+
+    m = Muestreador(cliente(cargador))
+    t = local(18, 3)  # miércoles 03:00
+    escritura.leer(conn, cliente(cargador), t - timedelta(minutes=10))  # la 6 aún inactiva
+    cargador.tareas[6]["active"] = 1  # activada desde la app (miércoles 00:00–08:00)
+    for k in range(3):
+        m.vigilar_carga(conn, t + timedelta(minutes=k), True, Decimal(4000))
+    assert sum(1 for p in cargador.peticiones if p[0] == "GET") == 2  # se vuelve a leer una vez
+    assert _carga_sin_tarea(conn) == []
+
+
+def test_carga_sin_lectura_del_programador_no_decide(conn: psycopg.Connection, limpio: None,
+                                                     cargador: CargadorHTTP) -> None:
+    from decimal import Decimal
+
+    from energia_monitor.muestreo import Muestreador
+
+    m = Muestreador(cliente(cargador))
+    cargador.fallar = ["GET", "GET"]
+    for k in range(2):
+        m.vigilar_carga(conn, local(18, 16, k), True, Decimal(4000))
+    assert _carga_sin_tarea(conn) == []

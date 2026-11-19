@@ -66,6 +66,13 @@ Antes de cualquier cambio, leer:
   (docs/tareas/etapa-3-planificador.md, «Paso 3c»). Tareas del cargador hoy: 5 y 6 del usuario
   (app de Orbis, inactivas) y 9, la guardiana; el código nunca toca la 5
   ni la 6, y la guardiana solo la crea, activa o corrige.
+  Paso 3d reducido (v0.8.0, migración 0023, sin desplegar): avisos que
+  faltaban de E3.10 (planificador parado, precios sin publicar, salida no
+  cubierta, tarea ajena sobre la franja en curso, cargador distinto del
+  plan), catálogo `aviso_tipo` con columna `correo` y vigilancia por correo
+  desde DSM (`deploy/vigilancia.sh` → servicio `vigilancia`, perfil propio,
+  rol `grafana_ro`; tarea en deploy/README.md). Grafana de la etapa 3
+  (bandas de franjas y panel de ahorro), pendiente.
   Después de la etapa 3, calibración con Datadis (docs/fase2.md).
 
 ## Estructura
@@ -106,9 +113,9 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva. La 0022 no está publicada hasta desplegar v0.7.0 (se
+  migración nueva. La 0023 no está publicada hasta desplegar v0.8.0 (se
   puede corregir actualizando su hash en tests/test_migraciones.py); la
-  siguiente es la 0023.
+  siguiente es la 0024.
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de
