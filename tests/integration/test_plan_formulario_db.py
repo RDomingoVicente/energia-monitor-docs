@@ -320,3 +320,19 @@ def test_modificar_rellena_el_formulario(conn: psycopg.Connection, nombre_bd: st
     html = get(nombre_bd, AHORA, f"/plan?modificar={local(12, 2).isoformat().replace('+', '%2B')}")
     assert "Modificar franja" in html and 'value="02:00"' in html and 'value="04:00"' in html
     assert f'name="anterior_inicio" value="{local(12, 2).isoformat()}"' in html
+
+
+def test_mensajes_del_ultimo_calculo_en_inicio_y_plan(conn: psycopg.Connection, nombre_bd: str,
+                                                       limpio: None) -> None:
+    """Coche fuera en modo prudente: Inicio dice por qué no hay cargas y Plan de carga, la hora, el motivo y los
+    mensajes del último cálculo. Informativos: no son avisos de v_aviso."""
+    escenario(conn, enchufado=False)
+    plan = guardar_plan(conn, AHORA)
+    assert not plan.franjas
+    t = texto(get(nombre_bd, AHORA, "/").encode())
+    assert "Sin cargas programadas: modo prudente y el coche fuera; se planificará al enchufar." in t
+    html = get(nombre_bd, AHORA, "/plan")
+    assert ('<p class="k texto mensajes-plan">Último cálculo 20:00 · test · Modo prudente y el coche fuera; se '
+            'planificará al enchufar.</p>') in html
+    assert conn.execute("SELECT count(*) FROM bateria_avisos(%s) WHERE detalle ILIKE '%%prudente%%'"
+                        " OR titulo ILIKE '%%prudente%%'", (AHORA,)).fetchone() == (0,)

@@ -343,8 +343,12 @@ nota y fecha de alta:
   cerrarse la sesión se usa el contador del cargador; se acepta el pequeño
   salto entre los dos (0,3 % medido el 14/11/2026).
 - **Lectura a mitad de un evento** (el nivel se puede leer en remoto):
-  - con el coche fuera, el trayecto en curso se parte por tiempo: la parte
-    anterior a la lectura cuenta antes y el resto después;
+  - con el coche fuera, el trayecto en curso se parte en la lectura. Mientras
+    sigue abierto, la parte anterior no resta nada estimado (recibe el
+    consumo real al reconciliar) y el estimado entero, menos lo ya
+    reconciliado, queda como trayecto en curso. Al cerrarse, las partes se
+    reparten por tiempo (0024; antes, la parte anterior se llevaba todo el
+    estimado);
   - durante una carga, la sesión se parte por la energía del modulador antes
     y después de la lectura.
 - Antes de la primera lectura no hay nivel: la página lo dice y pide una.
@@ -390,7 +394,10 @@ A1 + energía de las sesiones × factor − A2.
   consumo estimado (a partes iguales si todos los estimados son 0); esos
   trayectos quedan con consumo real y origen `reconciliado`.
 - Si el resultado es negativo o supera la capacidad, no se aplica: se marca
-  el intervalo como incoherente y se muestra en la página.
+  el intervalo como incoherente y se muestra en la página. Tolerancia
+  (0024): un resultado entre −`tolerancia_lectura_pts` (2 pts ≈ 1,8 kWh) y
+  0 es redondeo de dos lecturas sin decimales; se reparte como 0 y no es
+  incoherente (el intervalo guarda el valor calculado).
 - Un intervalo sin trayectos no cortos no tiene nada que repartir: con
   carga, la diferencia es error del factor (E2.6), no incoherencia; solo es
   incoherente si supera la capacidad o si, sin ninguna carga, el nivel sube.
@@ -479,7 +486,10 @@ muestras y los dos extremos del intervalo.
   pasado nada; `leido_carga` si solo ha habido cargas (sesiones, la sesión en
   curso o cargas externas con kWh); `estimado` con trayectos no cortos desde
   entonces, con el coche fuera, si el último valor absoluto es una carga
-  completa (regla sin verificar) o si no hay lecturas (nivel NULL).
+  completa (regla sin verificar) o si no hay lecturas (nivel NULL). Con el
+  coche fuera y la última lectura posterior a la salida en curso, `leido`
+  (o `leido_carga`): es el nivel a la salida; Inicio lo dice y el trayecto
+  en curso se descuenta solo al prever la próxima salida (0024).
 - **Cargas externas** (0016): evento `carga_externa` (orden 4; la lectura
   pasa a 5) que parte el trayecto por tiempo. Con kWh suma kWh ×
   `factor_bateria` y entra en la reconciliación como una sesión más; sin kWh
@@ -596,6 +606,51 @@ regulado, estimado, usuario o ficha_tecnica. Los booleanos se guardan como
 - La regla de carga completa (E2.3).
 - El estado del conector cuando el coche corta la carga por estar lleno (4 u
   8).
+
+### Revisión del 19/11/2026 (v0.8.1, migración 0024)
+
+Caso del NAS: intervalo del 18/11 10:26 (lectura 73 %) al 19/11 10:53
+(lectura 100 %), con el coche enchufado sin interrupción del 17/11 12:37 al
+19/11 10:51. La estimación a las 10:53 daba 75 % y el intervalo salía
+«incoherente» (consumo −0,98 kWh).
+
+- **Causa, comprobada con cargador_estado, cargador_muestra,
+  bateria_trayecto y bateria_intervalo:** la lectura de las 10:53 cayó 2
+  minutos después de salir (10:51), dentro del trayecto aún abierto. La
+  parte anterior al corte de un trayecto abierto pesaba 1, así que los 21,47
+  kWh estimados (P75) se aplicaron enteros en esos 2 minutos. No fue el
+  cierre de la carga por coche lleno (estado 8 a las 06:15 y 4 a las 06:31,
+  ambos «conectado») ni un reinicio del muestreo.
+- **Reinicios del muestreo:** no dejan huecos ni cambios de estado con el
+  coche conectado (el despliegue del 18/11 a las 14:01 solo desplazó el
+  ritmo de las muestras). Se fija con un test, sin regla nueva.
+- **«Conexión 18/11 14:23» en Inicio:** el cargador dio estado 1 (evento 2)
+  dos muestras, de 14:21 a 14:23, sin desconexión real. Era un trayecto
+  corto (consumo 0); la vista de eventos ya no muestra «conexión» en la
+  llegada de un trayecto corto.
+- **Trayecto en curso:** `bateria_estado` no lo descontaba si la lectura era
+  posterior a la salida, así que Inicio («cubierto +51 pts») y el
+  planificador partían del 100 %. Ahora se descuenta su estimado menos lo ya
+  reconciliado.
+- **Efecto en los planes de sombra:** ninguno hasta la salida (nivel de
+  partida 65,7 kWh, que llegó a 89,4 con la carga, frente al 100 % real; 30,4
+  kWh planificados). Desde las 10:53 del 19/11, los planes partían del 100 %
+  sin restar el trayecto en curso (unos 24 pts de más). Para el viernes 20/11
+  no cambia nada práctico (unos 76 % previstos frente a un objetivo de unos
+  49 %).
+- **Barra de Inicio:** sin el 0 o el 100 de la escala cuando el nivel está a
+  menos de 4 pts del extremo.
+- **Mensajes del último cálculo** (`plan_calculo.avisos`), que no se veían:
+  Inicio dice por qué no hay cargas («Sin cargas programadas: modo prudente
+  y el coche fuera; se planificará al enchufar.») y el panel de control de
+  Plan de carga muestra «Último cálculo HH:MM · motivo · mensajes». Texto
+  secundario, no avisos (formulario-maquetas.md, 7.1 y 7.9). Con el coche
+  fuera en modo prudente, ese es el único mensaje (sin «no cubre la
+  salida»).
+- La migración recalcula al aplicarse: el intervalo del 18–19/11 queda
+  reconciliado (−0,98 kWh dentro de la tolerancia) y su aviso desaparece.
+  Verificado con los escenarios equivalentes (SQL frente a la referencia en
+  Python); **pendiente de comprobar en el NAS tras desplegar**.
 
 ## Etapa 3: planificador de carga
 

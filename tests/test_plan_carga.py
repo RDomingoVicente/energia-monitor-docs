@@ -528,3 +528,10 @@ def _invariantes(semilla: int) -> None:
         if f.fin - f.inicio < timedelta(minutes=p.franja_min_min):
             assert f.motivo == "necesaria"
     assert plan.tareas <= p.max_tareas or any("tareas" in a for a in plan.avisos)
+
+
+def test_prudente_con_el_coche_fuera_solo_explica_el_motivo() -> None:
+    """Sin ventana segura no se planifica: un único mensaje, el que Inicio muestra junto a «Sin cargas programadas»."""
+    plan = planificar(entrada([0.1, 0.1, 0.1], salidas=[(2, 80, 10)], nivel=20, conectado=False, prudente=True))
+    assert not plan.franjas and not plan.salidas[0].cubierta
+    assert plan.avisos == ("Modo prudente y el coche fuera; se planificará al enchufar.",)

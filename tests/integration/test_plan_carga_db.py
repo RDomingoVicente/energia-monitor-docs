@@ -30,7 +30,7 @@ FUENTE = "plan_test"
 GRUPOS = {
     1: ["capacidad_util_kwh", "reserva_pct", "tope_pct", "factor_bateria", "consumo_kwh_100km"],
     2: ["desconexion_min_s", "detectar_carga_completa", "energia_min_calibracion_kwh", "observaciones_calibracion",
-        "umbral_carga_externa_kwh"],
+        "umbral_carga_externa_kwh", "tolerancia_lectura_pts"],  # 0024
     3: ["percentil_planificacion", "ventana_consumo_dias", "consumo_inicial_trayecto_kwh"],
     4: ["margen_carga_pct", "margen_salida_min", "carga_oportunista", "umbral_oportunista_pct",
         "nivel_oportunista_pct", "ventana_precio_esperado_dias", "ventana_umbral_dias"],

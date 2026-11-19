@@ -302,3 +302,37 @@ def test_ultimos_cambios_agrupan_las_altas_en_bloque() -> None:
     agrupados = _cambios_agrupados(filas)
     assert [(c.clave, c.n) for c in agrupados] == [("reserva_pct", 1), ("plan_0", 5), ("e39_0", 14), ("viejo_0", 1),
                                                     ("viejo_1", 1)]
+
+
+# --- 0024: nivel a la salida y extremos de la barra ------------------------------------------------------
+
+
+def test_lectura_al_salir_es_leido_y_nivel_a_la_salida() -> None:
+    """El 19/11/2026: salida a las 10:51 y lectura del 100 % a las 10:53, con el coche ya fuera."""
+    d = datos_inicio(coche="fuera", estado_conector=1, fuera_desde=AHORA - timedelta(minutes=2),
+                     ultima_lectura_ts=AHORA, ultima_lectura_pct=D(100), ultimo_absoluto=AHORA,
+                     nivel_kwh=D("91.3"), nivel_pct=D(100), consumo_en_curso_kwh=D("21.47"),
+                     nivel_plan_kwh=D("69.83"), energia_necesaria_kwh=D(0))
+    t = texto(inicio.pantalla(d))
+    assert "LEÍDO 100 %" in t and "nivel a la salida · leído hoy" in t
+    assert "Nivel a la salida, leído por ti hoy a las 19:30. Trayecto en curso: −24 pts estimados" in t
+    assert "+18 pts de margen" in t  # 69,83 kWh previstos frente al objetivo de 53,8 kWh, no desde el 100 %
+
+
+@pytest.mark.parametrize(("nivel", "cero", "cien"), [(D(100), True, False), (D(97), True, False),
+                                                     (D(96), True, True), (D(52), True, True),
+                                                     (D(4), True, True), (D(3), False, True)])
+def test_extremos_de_la_escala_ocultos_junto_al_nivel(nivel: D, cero: bool, cien: bool) -> None:
+    html = inicio.pantalla(datos_inicio(nivel_pct=nivel, nivel_kwh=nivel * D("0.913"),
+                                        nivel_plan_kwh=nivel * D("0.913")))
+    assert ('class="cero"' in html, 'class="cien"' in html) == (cero, cien)
+
+
+def test_sin_cargas_programadas_dice_por_que() -> None:
+    d = datos_inicio()
+    assert "Sin cargas programadas." in texto(inicio.pantalla(d))
+    d.mensajes_plan = ["Modo prudente y el coche fuera; se planificará al enchufar."]
+    html = inicio.pantalla(d)
+    assert ('<p class="vacio">Sin cargas programadas: modo prudente y el coche fuera; se planificará al enchufar.</p>'
+            in html)
+    assert inicio.motivo_sin_cargas(["Uno.", "Dos"]) == "uno; dos"

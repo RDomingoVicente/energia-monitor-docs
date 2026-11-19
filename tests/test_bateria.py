@@ -133,11 +133,16 @@ def test_lectura_durante_un_trayecto_lo_parte_por_tiempo() -> None:
 def test_lectura_con_el_coche_fuera() -> None:
     e, ahora, r = calcular("lectura_durante_trayecto_abierto")
     (parte,) = [ev for ev in r.eventos if ev.tipo == "trayecto"]
-    assert parte.peso == 1 and parte.instante == t(10)  # todo lo estimado, antes de la lectura
+    # 0024: la parte de un trayecto abierto anterior a la lectura pesa 0 (antes, 1: todo lo estimado en ella).
+    assert parte.peso == 0 and parte.instante == t(10) and parte.delta_estimado_kwh == 0
+    (i,) = r.intervalos[-1:]
+    assert i.estado == "reconciliado" and cerca(parte.delta_kwh, -(kwh(80) - kwh(60)))  # recibe el consumo real
     (tr,) = r.trayectos
     assert tr.llegada is None and tr.consumo_kwh is None and tr.origen_consumo == "inicial"
     est = bateria.estado(e, r, ahora)
-    assert est.coche == "fuera" and est.consumo_en_curso_kwh == 0  # ya descontado en la lectura
+    # En curso: el estimado (25, consumo inicial) menos lo ya reconciliado; nivel a la salida LEÍDO.
+    assert est.coche == "fuera" and cerca(est.consumo_en_curso_kwh, 25 - (kwh(80) - kwh(60)))
+    assert est.confianza == "leido"
 
 
 def test_lectura_durante_una_carga_la_parte_por_energia_del_modulador() -> None:
@@ -377,7 +382,10 @@ def test_historias_aleatorias_coherentes(semilla: int) -> None:
             partes = [ev for ev in r.eventos if ev.tipo == "trayecto" and a1.n < ev.n < a2.n
                       and ev.trayecto_salida not in cortos]
             total = sum((-ev.delta_kwh for ev in partes), D(0))  # type: ignore[operator]
-            assert cerca(total, i.consumo_real_kwh, "1e-6")
+            # Tolerancia de lectura (0024): un consumo negativo de hasta 2 pts se reparte como 0.
+            tolerancia = 2 * cap / 100
+            esperado = D(0) if -tolerancia <= i.consumo_real_kwh < 0 else i.consumo_real_kwh
+            assert cerca(total, esperado, "1e-6")
     assert [ev.n for ev in r.eventos] == list(range(1, len(r.eventos) + 1))
 
 
@@ -495,3 +503,38 @@ def test_objetivo_por_salida() -> None:
     # Las demás salidas, con el P75 (aquí el consumo inicial).
     assert all(cerca(x.objetivo_kwh, kwh(25) + 25) for x in s[1:])
     assert bateria.estado(e, r, ahora).objetivo_kwh == CAP
+
+
+# --- 0024: trayecto abierto partido por una lectura y tolerancia de lectura -------------------------------
+
+
+def test_lectura_al_salir_no_descuenta_el_trayecto_antes_de_la_lectura() -> None:
+    """El caso del 19/11/2026: antes, la estimación daba 75 % (−21,47 kWh en 2 minutos) y el intervalo, incoherente."""
+    e, ahora, r = calcular("lectura_al_salir")
+    lectura = [ev for ev in r.eventos if ev.tipo == "lectura"][-1]
+    assert cerca(lectura.estimado_previo_kwh, kwh(73) + D(27523) / 1000 * D("0.86"))  # 98,9 %, sin el trayecto
+    i = r.intervalos[-1]
+    assert cerca(i.consumo_real_kwh, kwh(73) + D(27523) / 1000 * D("0.86") - kwh(100))  # −0,98 kWh, se guarda
+    assert i.estado == "reconciliado" and i.trayectos == 1
+    (parte,) = [ev for ev in r.eventos if ev.tipo == "trayecto"]
+    assert parte.delta_kwh == 0
+    est = bateria.estado(e, r, ahora)
+    assert (est.coche, est.confianza) == ("fuera", "leido")
+    assert est.consumo_en_curso_kwh == 25  # todo el estimado (consumo inicial) sigue en curso
+    assert cerca(est.nivel_kwh, kwh(100)) and cerca(est.nivel_plan_kwh, kwh(100) - 25)
+
+
+@pytest.mark.parametrize(("nombre", "estado"), [
+    ("tolerancia_lectura", "reconciliado"),
+    ("tolerancia_superada", "incoherente"),
+    ("tolerancia_sin_carga", "sin_trayectos"),
+    ("intervalo_incoherente", "incoherente"),
+])
+def test_tolerancia_de_lectura(nombre: str, estado: str) -> None:
+    _, _, r = calcular(nombre)
+    i = r.intervalos[-1]
+    assert i.estado == estado
+    if estado == "reconciliado":
+        (tr,) = r.trayectos
+        assert tr.origen_consumo == "reconciliado" and tr.consumo_kwh == 0
+        assert cerca(i.consumo_real_kwh, kwh(60) - kwh(61))  # el calculado, −1 pt

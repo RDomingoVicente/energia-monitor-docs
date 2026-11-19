@@ -667,8 +667,9 @@ def test_claves_con_textos_y_rango(conn: psycopg.Connection, limpio: None) -> No
     filas = conn.execute(
         "SELECT k.clave, k.nombre, k.descripcion, k.efecto, k.minimo, k.maximo, p.valor"
         " FROM bateria_parametro_clave k JOIN bateria_parametro p USING (clave) ORDER BY k.clave").fetchall()
-    # 15 de la etapa 2, 19 del planificador (0020), congelar_franja_min (0022) y aviso_precios_min (0023)
-    assert len(filas) == 36
+    # 15 de la etapa 2, 19 del planificador (0020), congelar_franja_min (0022), aviso_precios_min (0023) y
+    # tolerancia_lectura_pts (0024)
+    assert len(filas) == 37
     for clave, nombre, descripcion, efecto, minimo, maximo, valor in filas:
         assert nombre and descripcion and efecto, clave
         assert minimo <= valor <= maximo, clave
@@ -1013,3 +1014,39 @@ def test_eventos_de_carga_con_energia_medida(conn: psycopg.Connection, limpio: N
     assert conn.execute("SELECT valor, medido_kwh FROM v_bateria_evento_reciente WHERE tipo = 'carga_externa'"
                         ).fetchone() == (None, None)
 
+
+# --- 0024 ------------------------------------------------------------------------------------------
+
+
+def test_trayecto_corto_sin_conexion_en_los_eventos(conn: psycopg.Connection, limpio: None) -> None:
+    """El 18/11/2026 a las 14:21 el cargador dio estado 1 dos minutos sin desconexión real: trayecto corto, sin
+    «conexión» en Inicio."""
+    e, ahora = ESCENARIOS["desconexion_corta"]()
+    comparar(conn, e, ahora)
+    tipos = [f[0] for f in conn.execute("SELECT tipo FROM v_bateria_evento_reciente ORDER BY instante")]
+    assert "conexion" not in tipos and "trayecto" not in tipos
+    limpiar(conn)
+    e, ahora = ESCENARIOS["trayecto_reconciliado"]()
+    comparar(conn, e, ahora)
+    assert conn.execute("SELECT count(*) FROM v_bateria_evento_reciente WHERE tipo = 'conexion'").fetchone() == (1,)
+
+
+def test_reinicio_del_muestreo_con_el_coche_conectado_no_crea_trayecto(conn: psycopg.Connection,
+                                                                      limpio: None) -> None:
+    """Comprobado con los datos del NAS del 18/11/2026: un reinicio (aquí, con 20 minutos de hueco) con el coche
+    conectado no registra cambios de estado ni trayectos."""
+    from energia_monitor import muestreo
+    from energia_monitor.viaris import EstadoConector, Modulador
+
+    cero = Modulador(D(0), D(300), D(300))
+    t0 = datetime(2026, 11, 18, 13, tzinfo=UTC)
+    for k in range(3):
+        muestreo.guardar_muestra(conn, t0 + timedelta(minutes=k), cero, 4)
+        muestreo.registrar_estado(conn, t0 + timedelta(minutes=k), EstadoConector(4, "7", None, None))
+    tras = t0 + timedelta(minutes=22)  # el contenedor vuelve tras un hueco
+    muestreo.guardar_muestra(conn, tras, cero, 4)
+    assert not muestreo.registrar_estado(conn, tras, EstadoConector(4, "7", None, None))
+    conn.execute("SELECT recalcular_bateria(%s)", (tras + timedelta(minutes=5),))
+    assert conn.execute("SELECT count(*) FROM cargador_estado").fetchone() == (1,)
+    assert conn.execute("SELECT count(*) FROM bateria_trayecto").fetchone() == (0,)
+    assert conn.execute("SELECT intervalo_s FROM cargador_muestra WHERE instante = %s", (tras,)).fetchone() == (None,)

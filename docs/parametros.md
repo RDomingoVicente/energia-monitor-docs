@@ -257,6 +257,9 @@ reglas que los de la batería (CLI con `--ambito bateria`). Migración 0020:
 - `congelar_franja_min` (0022, grupo 6, 30 min, rango 0–120): una franja
   propia que empieza en menos de ese tiempo ya no se mueve ni se borra; se
   deja como está en el cargador y el plan cuenta su energía.
+- `tolerancia_lectura_pts` (0024, grupo 2, 2 pts, rango 0–5): en la
+  reconciliación, un consumo negativo de hasta estos puntos es redondeo de
+  dos lecturas sin decimales y cuenta como 0 (no da «Intervalo incoherente»).
 - `aviso_precios_min` (0023, grupo 7, 30 min, rango 0–240): margen tras
   `hora_publicacion_precios` antes del aviso «Precios del día siguiente sin
   publicar» (el colector descarga a la misma hora de la publicación).

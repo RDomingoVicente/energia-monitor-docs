@@ -336,6 +336,7 @@ class App:
                    form: inicio.FormLectura | None = None, estado: int = 200) -> Respuesta:
         d = datos.inicio(conn, self.reloj())
         d.modo_plan, d.proximas = plan_datos.proximas_cargas(conn, self.reloj())
+        d.mensajes_plan = plan_datos.mensajes_plan(conn, self.reloj())
         ok = _ok(p)
         if form is None and ok is not None and ok[0] == "lectura":
             d.lectura_guardada = datos.lectura_guardada(conn, ok[1])

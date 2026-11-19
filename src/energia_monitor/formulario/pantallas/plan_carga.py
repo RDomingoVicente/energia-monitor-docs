@@ -143,7 +143,11 @@ def _control(d: PlanCarga, fm: FormModo) -> Html:
                             f.entero(d.umbral_pct), f.numero(media, 3), d.ventana_umbral_dias))
         if d.prudente:
             lineas.append(Html('<p class="sub m aviso">modo prudente: solo con el coche enchufado</p>'))
-        lineas.append(h('<p class="k m">último cálculo {}</p>', f.cuando(d.calculado, d.ahora)))
+        # Hora, motivo y mensajes del último cálculo: informativos, en texto secundario (no son avisos).
+        cuando = f.hora(d.calculado) if f.local(d.calculado).date() == f.local(d.ahora).date() \
+            else f.dia_hora(d.calculado)
+        partes = [f"Último cálculo {cuando}"] + ([d.motivo_calculo] if d.motivo_calculo else []) + d.avisos
+        lineas.append(h('<p class="k texto mensajes-plan">{}</p>', " · ".join(partes)))
         estado = unir(lineas)
     opciones = unir(h('<label title="{}"><input type="radio" name="modo" value="{}"{}>{}</label>', titulo, modo,
                       Html(" checked") if modo == d.modo else Html(""), modo) for modo, titulo in MODOS)

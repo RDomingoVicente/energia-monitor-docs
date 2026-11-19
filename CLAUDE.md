@@ -73,6 +73,12 @@ Antes de cualquier cambio, leer:
   desde DSM (`deploy/vigilancia.sh` → servicio `vigilancia`, perfil propio,
   rol `grafana_ro`; tarea en deploy/README.md). Grafana de la etapa 3
   (bandas de franjas y panel de ahorro), pendiente.
+  v0.8.1 (migración 0024, sin desplegar): batería con el trayecto abierto
+  partido por una lectura (sus partes pesan 0 hasta la llegada), tolerancia
+  `tolerancia_lectura_pts` en «Intervalo incoherente», trayecto en curso
+  descontado con la lectura posterior a la salida, LEÍDO «nivel a la
+  salida» y sin «conexión» en trayectos cortos (docs/fase2.md, «Revisión
+  del 19/11/2026»).
   Después de la etapa 3, calibración con Datadis (docs/fase2.md).
 
 ## Estructura
@@ -113,9 +119,9 @@ Antes de cualquier cambio, leer:
 - Cálculos de dinero en SQL con `numeric`; referencia en Python puro para los
   tests.
 - **Las migraciones publicadas son inmutables**: cualquier cambio va en una
-  migración nueva. La 0023 no está publicada hasta desplegar v0.8.0 (se
-  puede corregir actualizando su hash en tests/test_migraciones.py); la
-  siguiente es la 0024.
+  migración nueva. La 0023 y la 0024 no están publicadas hasta desplegar
+  v0.8.0 y v0.8.1 (se pueden corregir actualizando su hash en
+  tests/test_migraciones.py); la siguiente es la 0025.
 - Usuario `grafana_ro` de solo lectura; las tablas y vistas nuevas deben
   quedar legibles para él.
 - Secretos solo por variables de entorno; `.env` fuera de git; el token de

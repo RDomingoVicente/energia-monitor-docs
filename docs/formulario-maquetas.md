@@ -197,7 +197,11 @@ Maquetas 01a, 01b, 01c.
   `margen`, `oportunista`, `manual`, `provisional`), kWh del cargador, coste
   (con «≈» si es provisional) y estado de ejecución (`programada`, `cargando`,
   `en pausa`). Móvil: lista con los mismos datos en dos líneas. Enlace «Plan de
-  carga →» («Plan →» en móvil). Sin franjas: «Sin cargas programadas». En
+  carga →» («Plan →» en móvil). Sin franjas: «Sin cargas programadas»; si
+  el último cálculo tiene mensajes (`plan_calculo.avisos`), el motivo en la
+  misma línea de texto secundario: «Sin cargas programadas: modo prudente y
+  el coche fuera; se planificará al enchufar.». Son informativos: no son
+  avisos de `v_aviso` ni van por correo. En
   modo sombra, la etiqueta `SOMBRA` en la cabecera del panel (siempre) y los
   estados de sombra de 7.9.
 - Tras guardar una lectura: banner verde «Lectura guardada: 52 % a las 19:42.
@@ -450,7 +454,11 @@ Escritorio, de arriba abajo:
      cubierta`; «objetivo 59 % · al terminar la franja en curso: 82 %»; «plan
      hasta mar 17/11 09:30 · 3 franjas · 8,95 € (≈4,09 € provisional)»;
      «umbral barato 0,211 €/kWh = 60 % × 0,352 (media 7 días)». En modo
-     prudente se añade «modo prudente: solo con el coche enchufado».
+     prudente se añade «modo prudente: solo con el coche enchufado». Al final,
+     en texto secundario, la hora, el motivo y los mensajes del último
+     cálculo: «Último cálculo 14:31 · periódico · Modo prudente y el coche
+     fuera; se planificará al enchufar.» (con fecha si no es de hoy).
+     Informativos, como en Inicio.
    - Modo: selector segmentado `sombra · activo · pausa` y, debajo, una frase
      sobre el modo elegido: «Activo: escribe sus franjas en el cargador y las
      revisa cada 15 min. En sombra solo calcula; en pausa no escribe y

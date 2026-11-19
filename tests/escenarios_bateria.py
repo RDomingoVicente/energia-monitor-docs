@@ -410,6 +410,42 @@ def coche_fuera() -> tuple[Entradas, datetime]:
     return c.e, t(6)
 
 
+# --- 0024: trayecto abierto partido por una lectura y tolerancia de lectura ------------------------------
+
+
+@escenario
+def lectura_al_salir() -> tuple[Entradas, datetime]:
+    """Como el 18–19/11/2026 en el NAS: lectura 73 %, carga hasta llenar (27,52 kWh × 0,86 = 23,67 a batería), salida
+    y, 2 minutos después, lectura 100 % con el coche ya fuera."""
+    c = (Constructor().estado(t(-10), 4).lectura(t(0), 73)
+         .sesion(t(2), t(8), 27523, origen_fin="schedman")
+         .trayecto(t(10), None).lectura(t(10) + 2 * MIN, 100))
+    return c.e, t(10) + 30 * MIN
+
+
+@escenario
+def tolerancia_lectura() -> tuple[Entradas, datetime]:
+    """Trayecto entre 60 % y 61 %: −1 pt, dentro de la tolerancia (2 pts)."""
+    c = (Constructor().estado(t(-10), 4).lectura(t(6), 60)
+         .trayecto(t(8), t(10)).lectura(t(11), 61))
+    return c.e, t(12)
+
+
+@escenario
+def tolerancia_superada() -> tuple[Entradas, datetime]:
+    """Trayecto entre 60 % y 63 %: −3 pts, fuera de la tolerancia: incoherente."""
+    c = (Constructor().estado(t(-10), 4).lectura(t(6), 60)
+         .trayecto(t(8), t(10)).lectura(t(11), 63))
+    return c.e, t(12)
+
+
+@escenario
+def tolerancia_sin_carga() -> tuple[Entradas, datetime]:
+    """Sin carga ni trayectos, de 60 % a 61 %: redondeo, no incoherente."""
+    c = Constructor().estado(t(-10), 4).lectura(t(6), 60).lectura(t(11), 61)
+    return c.e, t(12)
+
+
 def aleatorio(semilla: int) -> tuple[Entradas, datetime]:
     """Historia de varios días con enchufes, cargas, salidas y lecturas al azar."""
     rnd = random.Random(semilla)

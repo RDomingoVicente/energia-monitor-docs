@@ -100,6 +100,7 @@ class Inicio:
     # Próximas cargas (7.1, etapa 3): las pone app.get_inicio con plan_datos.proximas_cargas.
     modo_plan: str = "sombra"
     proximas: list[Any] = field(default_factory=list)
+    mensajes_plan: list[str] = field(default_factory=list)  # plan_calculo.avisos del último cálculo (informativos)
 
 
 def version_bd(conn: psycopg.Connection) -> str | None:

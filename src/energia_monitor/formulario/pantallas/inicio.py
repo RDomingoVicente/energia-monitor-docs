@@ -11,6 +11,8 @@ from energia_monitor.formulario.datos import Inicio
 from energia_monitor.formulario.html import Html, h, unir
 from energia_monitor.formulario.plantilla import banner
 
+# La etiqueta del nivel tapa el 0 o el 100 de la escala a menos de estos puntos del extremo.
+EXTREMO_PTS = 4
 ETIQUETA = {"leido": "LEÍDO", "leido_carga": "LEÍDO + CARGA", "estimado": "ESTIMADO"}
 CIEN = Decimal(100)
 
@@ -45,6 +47,14 @@ def _texto_bateria(d: Inicio) -> tuple[str, str]:
         corto = f"leído {f.cuando(ts, d.ahora)}"
         cuando = (f"hoy a las {f.hora(ts)}" if f.cuando(ts, d.ahora).startswith("hoy")
                   else f"el {f.dia(ts)} a las {f.hora(ts)}")
+        if e["coche"] == "fuera":
+            # Lectura posterior a la salida en curso (0024): es el nivel a la salida; el trayecto se descuenta al
+            # prever la próxima salida, no en este valor.
+            en_curso = e["consumo_en_curso_kwh"] or Decimal(0)
+            resto = (f" Trayecto en curso: {f.MENOS}{f.entero(en_curso / cap * CIEN)} pts estimados, que se "
+                     "descuentan al prever la próxima salida." if en_curso > 0 else "")
+            return (f"nivel a la salida · {corto}",
+                    f"Nivel a la salida, leído por ti {cuando}.{resto} {_frase_objetivo(d)}".strip())
         return corto, f"Nivel leído por ti {cuando}. {_frase_objetivo(d)}"
     if lec is None or ts is None:
         # Sin lectura activa pero con nivel: tras una carga completa o con datos derivados sin recalcular.
@@ -110,7 +120,11 @@ def _barra(d: Inicio, movil: bool = False) -> Html:
         partes.append(h('<div class="marca objetivo x-{}"></div>', objetivo))
     escala: list[Html] = []
     if not movil:
-        escala += [Html('<span class="cero">0</span>'), Html('<span class="cien">100</span>')]
+        # Sin el 0 o el 100 del extremo si la etiqueta del nivel caería encima («10100»).
+        if nivel is None or nivel >= EXTREMO_PTS:
+            escala.append(Html('<span class="cero">0</span>'))
+        if nivel is None or nivel <= 100 - EXTREMO_PTS:
+            escala.append(Html('<span class="cien">100</span>'))
     escala.append(h('<span class="reserva x-{}">reserva {}</span>', reserva, reserva))
     if nivel is not None and not movil:
         escala.append(h('<span class="nivel x-{}">{}</span>', nivel, nivel))
@@ -224,10 +238,19 @@ def _motivos(fr) -> Html:  # type: ignore[no-untyped-def]
     return h('<span class="motivos">{}</span>', unir(etiquetas))
 
 
+def motivo_sin_cargas(mensajes: list[str]) -> str:
+    """«Modo prudente y el coche fuera; se planificará al enchufar.» → «modo prudente y el coche fuera; ...»."""
+    partes = [m.rstrip(". ") for m in mensajes if m.strip()]
+    return "; ".join(p[:1].lower() + p[1:] for p in partes)
+
+
 def _proximas(d: Inicio) -> Html:
     """Próximas cargas (7.1, etapa 3): las siguientes franjas del plan; en sombra, estados de sombra (7.9)."""
     sombra = Html('<span class="tag estimado">SOMBRA</span>') if d.modo_plan == "sombra" else Html("")
-    if not d.proximas:
+    if not d.proximas and d.mensajes_plan:
+        # Por qué no hay franjas: los mensajes del último cálculo, informativos (no son avisos).
+        cuerpo = h('<p class="vacio">Sin cargas programadas: {}.</p>', motivo_sin_cargas(d.mensajes_plan))
+    elif not d.proximas:
         cuerpo = Html('<p class="vacio">Sin cargas programadas.</p>')
     else:
         filas, items = [], []

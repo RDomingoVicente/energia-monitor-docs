@@ -79,6 +79,7 @@ PARAMETROS_INICIALES: dict[str, Decimal] = {
     "horizonte_plan_h": Decimal(72),
     "hora_publicacion_precios": Decimal(810),  # minutos desde las 00:00 (13:30)
     "congelar_franja_min": Decimal(30),  # 0022
+    "tolerancia_lectura_pts": Decimal(2),  # 0024
     "aviso_precios_min": Decimal(30),  # 0023
 }
 
@@ -406,8 +407,11 @@ def construir_eventos(e: Entradas, sesiones: list[SesionClasificada], trayectos:
         if t.llegada is not None:
             puntos.append(t.llegada)
         for a, b in zip(puntos, puntos[1:]):
+            # Trayecto abierto partido por un valor absoluto o una carga externa (0024): sus partes pesan 0 y todo
+            # el consumo estimado queda pendiente (en curso) hasta la llegada; al cerrarse, se reparte por tiempo.
+            peso = CERO if t.llegada is None else _segundos(a, b) / _segundos(t.salida, puntos[-1])
             eventos.append(Evento(b, 3, _ref_trayecto(t), "trayecto", t.conector, trayecto_salida=t.salida,
-                                  peso=_segundos(a, b) / _segundos(t.salida, puntos[-1])))
+                                  peso=peso))
     for s in sesiones:
         if s.cierre == "carga_completa":
             eventos.append(Evento(s.fin, 2, f"carga_completa:{s.conector}:{s.id}", "carga_completa", s.conector,
@@ -549,6 +553,10 @@ def _reconciliar(e: Entradas, a1: Evento, a2: Evento, eventos: list[Evento],
     cortas = len(partes) - len(largas)
     est = sum((-ev.delta_estimado_kwh for ev in largas), CERO)  # type: ignore[operator]
     real = a1.absoluto_kwh + s_kwh + x_kwh - a2.absoluto_kwh
+    # Tolerancia de lectura (0024): un consumo negativo de hasta tolerancia_lectura_pts es error de redondeo de dos
+    # lecturas sin decimales; cuenta como 0 (el intervalo guarda el valor calculado).
+    tolerancia = p.valor("tolerancia_lectura_pts", a2.instante) / CIEN * cap
+    aplicado = CERO if -tolerancia <= real < 0 else real
     huecos = hay_hueco(e.muestras, a1.instante, a2.instante, p.valor("hueco_muestreo_aviso_s", a2.instante))
     factor = None
     if sin_kwh:
@@ -558,7 +566,7 @@ def _reconciliar(e: Entradas, a1: Evento, a2: Evento, eventos: list[Evento],
     elif not largas:
         # Sin trayectos que repartir. Con carga, la diferencia es error del factor (E2.6), no
         # incoherencia; sin carga, el nivel no puede subir.
-        if real > cap or (c_kwh == 0 and real < 0):
+        if aplicado > cap or (c_kwh == 0 and aplicado < 0):
             estado = "incoherente"
         else:
             estado = "sin_trayectos"
@@ -567,13 +575,13 @@ def _reconciliar(e: Entradas, a1: Evento, a2: Evento, eventos: list[Evento],
                 observado = (a2.absoluto_kwh - a1.absoluto_kwh) / c_kwh
                 if 0 < observado <= 1:
                     factor = observado
-    elif real < 0 or real > cap:
+    elif aplicado < 0 or aplicado > cap:
         estado = "incoherente"
     else:
         estado = "reconciliado"
         for ev in largas:
             assert ev.delta_estimado_kwh is not None
-            ev.delta_kwh = -(real / len(largas) if est == 0 else real * (-ev.delta_estimado_kwh) / est)
+            ev.delta_kwh = -(aplicado / len(largas) if est == 0 else aplicado * (-ev.delta_estimado_kwh) / est)
         for t in {(ev.conector, ev.trayecto_salida) for ev in largas}:
             tr = por_clave[t]  # type: ignore[index]
             todas = [ev for ev in eventos if ev.tipo == "trayecto" and ev.conector == tr.conector
@@ -760,10 +768,17 @@ def estado(e: Entradas, r: Resultado, ahora: datetime) -> Estado:
     else:
         coche = "desconocido"
     en_curso = CERO
+    abierto = None
     if coche == "fuera":
         abiertos = sorted((t for t in r.trayectos if t.llegada is None), key=lambda t: t.salida)
-        if abiertos and (ultimo_abs is None or ultimo_abs <= abiertos[-1].salida):
-            en_curso = abiertos[-1].consumo_estimado_kwh or CERO
+        abierto = abiertos[-1] if abiertos else None
+        if abierto is not None:
+            # Lo que falta del trayecto en curso (0024): su estimado menos lo ya aplicado a sus partes (0 estimado;
+            # el consumo real si una lectura las ha reconciliado).
+            aplicado = sum((-ev.delta_kwh for ev in pasados if ev.tipo == "trayecto"
+                            and ev.conector == abierto.conector and ev.trayecto_salida == abierto.salida
+                            and ev.delta_kwh is not None), CERO)
+            en_curso = max((abierto.consumo_estimado_kwh or CERO) - aplicado, CERO)
     nivel_plan = None if nivel is None else max(nivel - en_curso, CERO)
 
     proximas = salidas(e, ahora, 7, r.trayectos)
@@ -788,7 +803,9 @@ def estado(e: Entradas, r: Resultado, ahora: datetime) -> Estado:
         trayectos_desde = sum(1 for t in r.trayectos if not t.corto and t.llegada is not None
                               and ultima.instante < t.llegada <= ahora)
     confianza = "estimado"
-    if abs_ev is not None and abs_ev.tipo == "lectura" and coche != "fuera":
+    # Con el coche fuera, LEÍDO si la lectura es posterior a la salida en curso: es el nivel a la salida (0024).
+    lectura_en_salida = abierto is not None and abs_ev is not None and abs_ev.instante > abierto.salida
+    if abs_ev is not None and abs_ev.tipo == "lectura" and (coche != "fuera" or lectura_en_salida):
         despues_abs = [ev for ev in pasados if ev.n > abs_ev.n]
         con_trayecto = any(ev.tipo == "trayecto" and not por_salida(r, ev).corto for ev in despues_abs)
         if not con_trayecto:

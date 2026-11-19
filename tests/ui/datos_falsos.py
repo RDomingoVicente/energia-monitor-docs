@@ -325,5 +325,6 @@ def instalar(monkeypatch: Any) -> None:
     monkeypatch.setattr(d, "version_bd", lambda _conn: "9999")
     monkeypatch.setattr(pd, "plan_carga", plan_carga)
     monkeypatch.setattr(pd, "proximas_cargas", proximas_cargas)
+    monkeypatch.setattr(pd, "mensajes_plan", lambda _conn, _ahora: [])
     monkeypatch.setattr(pd, "accion", accion)
     monkeypatch.setattr(d, "lectura_guardada", lambda _conn, _id: None)

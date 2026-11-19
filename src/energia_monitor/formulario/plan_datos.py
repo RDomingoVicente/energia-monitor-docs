@@ -138,6 +138,7 @@ class PlanCarga:
     ahora: datetime
     modo: str
     calculado: datetime | None  # ahora del último cálculo; None: aún no hay plan
+    motivo_calculo: str | None = None  # periódico, estado 4, lectura...
     prudente: bool = False
     conectado: bool = False
     capacidad_kwh: Decimal = Decimal(0)
@@ -344,7 +345,7 @@ def _ahorro(conn: psycopg.Connection, ahora: datetime) -> list[Ahorro]:
 def plan_carga(conn: psycopg.Connection, ahora: datetime) -> PlanCarga:
     modo = conn.execute("SELECT planificador_modo_en(%s)", (ahora,)).fetchone()[0]  # type: ignore[index]
     calc = conn.execute(
-        "SELECT id, ahora, prudente, capacidad_kwh, umbral_eur_kwh, horizonte_fin, avisos FROM plan_calculo"
+        "SELECT id, ahora, prudente, capacidad_kwh, umbral_eur_kwh, horizonte_fin, avisos, motivo FROM plan_calculo"
         " WHERE ahora <= %s ORDER BY ahora DESC, id DESC LIMIT 1", (ahora,)).fetchone()
     d = PlanCarga(ahora, modo, None)
     d.pasadas = [FranjaPasada(i, f, m == "sombra", pk, tuple((n, k) for n, k in (("necesaria", nk), ("margen", mk),
@@ -357,7 +358,7 @@ def plan_carga(conn: psycopg.Connection, ahora: datetime) -> PlanCarga:
     _tareas_cargador(conn, d)
     if calc is None:
         return d
-    ident, d.calculado, d.prudente, d.capacidad_kwh, d.umbral, d.horizonte_fin, avisos = calc
+    ident, d.calculado, d.prudente, d.capacidad_kwh, d.umbral, d.horizonte_fin, avisos, d.motivo_calculo = calc
     d.avisos = list(avisos)
     d.factor_bateria = _param(conn, "factor_bateria", ahora)
     d.umbral_pct = _param(conn, "umbral_oportunista_pct", ahora)
@@ -431,6 +432,13 @@ def _tareas_cargador(conn: psycopg.Connection, d: PlanCarga) -> None:
 def accion(conn: psycopg.Connection, ident: int) -> Accion | None:
     fila = conn.execute("SELECT id, tipo, estado, resultado, datos FROM plan_accion WHERE id = %s", (ident,)).fetchone()
     return None if fila is None else Accion(*fila)
+
+
+def mensajes_plan(conn: psycopg.Connection, ahora: datetime) -> list[str]:
+    """Mensajes informativos del último cálculo (plan_calculo.avisos): no son avisos de v_aviso ni van por correo."""
+    fila = conn.execute("SELECT avisos FROM plan_calculo WHERE ahora <= %s ORDER BY ahora DESC, id DESC LIMIT 1",
+                        (ahora,)).fetchone()
+    return list(fila[0]) if fila else []
 
 
 def proximas_cargas(conn: psycopg.Connection, ahora: datetime, n: int = 3) -> tuple[str, list[FranjaPlan]]:

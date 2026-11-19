@@ -471,11 +471,12 @@ def planificar(e: Entrada) -> Plan:
     necesarias = {s.instante: max(CERO, s.objetivo_kwh - pl.nivel_en(s.instante, solo_fijos=True))
                   for s in e.salidas}
     if e.prudente and not e.conectado:
-        pl.avisos.append("Modo prudente y el coche no está enchufado: sin ventana segura, no se planifica.")
+        pl.avisos.append("Modo prudente y el coche fuera; se planificará al enchufar.")
     salidas = list(e.salidas[:1]) if e.prudente else list(e.salidas)
     cargado = pl.necesaria(salidas)
     pl.margen(salidas, cargado)
     pl.oportunista()
     pl.consolidar()
-    return pl.resultado(salidas, necesarias)
+    # Prudente y fuera: no se planifica; el único mensaje es ese (sin «no cubre la salida…»).
+    return pl.resultado([] if e.prudente and not e.conectado else salidas, necesarias)
 

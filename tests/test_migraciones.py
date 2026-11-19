@@ -37,6 +37,7 @@ PUBLICADAS = {
     "0021_plan_pantalla.sql": "7b5e4c2161af1a0b5d1e86897f82685d57305877921ccc77f1bd76b105b3db42",
     "0022_planificador_escritura.sql": "c2cd16b3760c516585e0316f793ceb220b44bf09984dec36f5d922974d1175a8",
     "0023_avisos_correo.sql": "d60f6a1facc813c1bc6e39995974fdd14506248e77381c204669c1d711ce50ae",
+    "0024_bateria_trayecto_abierto.sql": "eb0ce6ed48d8b3d4cc2e2b6a13fc6be1d6287d44a9fd798f97d8b75d00ba2fb5",
 }
 
 
